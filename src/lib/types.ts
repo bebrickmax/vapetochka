@@ -37,9 +37,17 @@ export interface Category {
 
 export type CatalogSource = "api" | "csv" | "demo";
 
+/** Оптовые цены — отдельный лист, показывается во вкладке «Акции и ОПТ». */
+export interface Wholesale {
+  groups: ProductGroup[];
+  /** Строки листа как текст — если лист устроен не как прайс. */
+  lines: string[];
+}
+
 export interface Catalog {
   categories: Category[];
   groups: ProductGroup[];
+  wholesale?: Wholesale;
   updatedAt: string;
   source: CatalogSource;
 }

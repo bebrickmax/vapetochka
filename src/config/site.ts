@@ -13,8 +13,7 @@ export const siteConfig = {
 
 export const sheetsConfig = {
   /** ID таблицы — часть ссылки между /d/ и /edit. */
-  spreadsheetId:
-    process.env.GOOGLE_SHEET_ID || "1T3SgqBTTdbUlBjC4UnRKk0G8mbqJK-5RJigP7azr3Rc",
+  spreadsheetId: process.env.GOOGLE_SHEET_ID || "1T3SgqBTTdbUlBjC4UnRKk0G8mbqJK-5RJigP7azr3Rc",
   /** Ключ Google API. Если задан — листы подхватываются автоматически. */
   apiKey: process.env.GOOGLE_API_KEY || "",
   /**
@@ -25,6 +24,11 @@ export const sheetsConfig = {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
+  /**
+   * Лист с оптовыми ценами: не попадает в каталог, а показывается
+   * во вкладке «Акции и ОПТ». Пустое значение — раздел ОПТ скрыт.
+   */
+  wholesaleSheet: process.env.WHOLESALE_SHEET ?? "ОПТ",
   /** Колонки, которые читаются с каждого листа. */
   columns: "A:H",
   /**

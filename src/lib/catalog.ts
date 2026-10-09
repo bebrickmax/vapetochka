@@ -1,10 +1,10 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { cacheConfig, sheetsConfig } from "@/config/site";
-import { demoSheets } from "@/data/demo-sheets";
+import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
-import { fetchViaApi, fetchViaCsv } from "@/lib/sheets/sources";
-import type { Catalog, CatalogSource, Category, ProductGroup, RawSheet } from "@/lib/types";
+import { fetchSheetByTitle, fetchViaApi, fetchViaCsv } from "@/lib/sheets/sources";
+import type { Catalog, CatalogSource, Category, ProductGroup, RawSheet, Wholesale } from "@/lib/types";
 
 /** Превращает сырые листы в каталог: категории (в порядке листов) + группы товаров. */
 export function buildCatalog(sheets: RawSheet[], source: CatalogSource): Catalog {
@@ -23,6 +23,35 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource): Catalog
   }
 
   return { categories, groups, updatedAt: new Date().toISOString(), source };
+}
+
+/** Лист «ОПТ» → оптовые позиции; если он не похож на прайс — просто строки текста. */
+export function buildWholesale(sheet: RawSheet): Wholesale | undefined {
+  const groups = parseSheet(sheet.rows, "wholesale");
+  const lines = groups.length
+    ? []
+    : sheet.rows
+        .map((row) =>
+          row
+            .map((c) => String(c ?? "").trim())
+            .filter(Boolean)
+            .join(" · "),
+        )
+        .filter(Boolean);
+  return groups.length || lines.length ? { groups, lines } : undefined;
+}
+
+async function loadWholesale(source: CatalogSource): Promise<Wholesale | undefined> {
+  const title = sheetsConfig.wholesaleSheet.trim();
+  if (!title) return undefined;
+  if (source === "demo") return buildWholesale(demoWholesaleSheet);
+  try {
+    return buildWholesale(await fetchSheetByTitle(title));
+  } catch (error) {
+    // Раздел ОПТ необязательный: без него каталог всё равно должен работать.
+    console.warn(`[catalog] Лист «${title}» недоступен:`, error);
+    return undefined;
+  }
 }
 
 async function loadSheets(): Promise<{ sheets: RawSheet[]; source: CatalogSource }> {
@@ -54,5 +83,7 @@ export async function getCatalog(): Promise<Catalog> {
   });
 
   const { sheets, source } = await loadSheets();
-  return buildCatalog(sheets, source);
+  const catalog = buildCatalog(sheets, source);
+  const wholesale = await loadWholesale(source);
+  return wholesale ? { ...catalog, wholesale } : catalog;
 }

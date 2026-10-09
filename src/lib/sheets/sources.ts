@@ -51,6 +51,28 @@ export async function fetchViaApi(): Promise<RawSheet[]> {
 }
 
 /**
+ * Один лист по названию — например, «ОПТ», который не входит в каталог.
+ * С ключом — через API, без ключа — CSV-выгрузкой по имени листа (gid не нужен).
+ */
+export async function fetchSheetByTitle(title: string): Promise<RawSheet> {
+  const { spreadsheetId, apiKey, columns } = sheetsConfig;
+  if (apiKey) {
+    const range = encodeURIComponent(`'${title.replace(/'/g, "''")}'!${columns}`);
+    const data = await getJson<{ values?: string[][] }>(
+      `${API_BASE}/${spreadsheetId}/values/${range}?key=${encodeURIComponent(apiKey)}&majorDimension=ROWS`,
+    );
+    return { title, rows: data.values ?? [] };
+  }
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&headers=0&sheet=${encodeURIComponent(title)}`;
+  const res = await fetch(url, { redirect: "follow" });
+  const text = await res.text();
+  if (!res.ok || text.trimStart().startsWith("<")) {
+    throw new Error(`Не удалось скачать лист «${title}» (${res.status}).`);
+  }
+  return { title, rows: parseCsv(text) };
+}
+
+/**
  * Режим без ключа: скачивает каждый лист как CSV.
  * Таблица должна быть доступна «всем, у кого есть ссылка».
  */
