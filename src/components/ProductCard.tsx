@@ -3,7 +3,8 @@ import { formatPrice } from "@/lib/format";
 import { displayLine } from "@/lib/products";
 import { orderMessage, telegramLink } from "@/lib/telegram";
 import type { Category, Product, StockStatus } from "@/lib/types";
-import { BellIcon, TelegramIcon } from "./icons";
+import { AddToCart } from "./cart/AddToCart";
+import { BellIcon } from "./icons";
 import { TelegramAnchor } from "./TelegramAnchor";
 
 const STATUS: Record<StockStatus, { label: string; dot: string; text: string }> = {
@@ -28,7 +29,6 @@ function ProductCardBase({ product, category, index }: ProductCardProps) {
   const available = product.status === "in";
   const title = product.line ? displayLine(product.line, product.strength) : product.name;
   const subtitle = product.line ? product.name : undefined;
-  const link = telegramLink(orderMessage(product));
 
   return (
     <article
@@ -93,16 +93,10 @@ function ProductCardBase({ product, category, index }: ProductCardProps) {
         </div>
 
         {available ? (
-          <TelegramAnchor
-            link={link}
-            className="neon-button flex h-12 min-w-[48%] shrink-0 items-center justify-center gap-2 rounded-2xl px-5 text-base font-bold text-white transition-transform active:scale-[0.96]"
-          >
-            <TelegramIcon />
-            Заказать
-          </TelegramAnchor>
+          <AddToCart product={product} />
         ) : (
           <TelegramAnchor
-            link={link}
+            link={telegramLink(orderMessage(product))}
             aria-label="Узнать о поступлении"
             className="flex h-12 min-w-[48%] shrink-0 items-center justify-center gap-2 rounded-2xl border border-line bg-surface-2 px-4 text-sm font-semibold text-ink/70 transition-transform active:scale-[0.96]"
           >

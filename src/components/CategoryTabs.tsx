@@ -6,7 +6,8 @@ export interface TabItem {
   id: string;
   title: string;
   icon: string;
-  count: number;
+  /** Не задано — счётчик не показывается (например, у вкладки акций). */
+  count?: number;
 }
 
 interface CategoryTabsProps {
@@ -47,20 +48,20 @@ export function CategoryTabs({ tabs, active, onSelect }: CategoryTabsProps) {
             aria-selected={selected}
             onClick={() => onSelect(tab.id)}
             className={`flex h-10 shrink-0 snap-start items-center gap-2 rounded-full px-4 text-sm font-bold transition-all duration-200 active:scale-95 ${
-              selected
-                ? "neon-button text-white"
-                : "border border-line bg-surface-2/80 text-ink/75 hover:text-ink"
+              selected ? "neon-button text-white" : "border border-line bg-surface-2/80 text-ink/75 hover:text-ink"
             }`}
           >
             <span aria-hidden>{tab.icon}</span>
             <span className="whitespace-nowrap">{tab.title}</span>
-            <span
-              className={`min-w-6 rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
-                selected ? "bg-black/25 text-white" : "bg-white/[0.07] text-muted"
-              }`}
-            >
-              {tab.count}
-            </span>
+            {tab.count !== undefined && (
+              <span
+                className={`min-w-6 rounded-full px-1.5 py-0.5 text-[11px] font-bold tabular-nums ${
+                  selected ? "bg-black/25 text-white" : "bg-white/[0.07] text-muted"
+                }`}
+              >
+                {tab.count}
+              </span>
+            )}
           </button>
         );
       })}
