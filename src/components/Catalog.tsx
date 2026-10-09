@@ -72,7 +72,7 @@ export function Catalog({ catalog }: { catalog: CatalogData }) {
     const categoryTabs = categories.map((c) => ({ ...c, count: counts.get(c.id) ?? 0 }));
     // Во время поиска пустые вкладки прячем, чтобы сразу было видно, где нашлось.
     const visibleTabs = searching ? categoryTabs.filter((t) => t.count > 0 || t.id === activeTab) : categoryTabs;
-    const promoTab = { id: PROMO, title: "Акции и Доп", icon: "🎁" };
+    const promoTab = { id: PROMO, title: "Акции и ОПТ", icon: "🎁" };
     const showPromo = !searching || activeTab === PROMO;
     return [
       { id: ALL, title: "Все", icon: "✨", count: matched.length },
@@ -158,7 +158,7 @@ export function Catalog({ catalog }: { catalog: CatalogData }) {
         <main className="flex-1 px-4 pb-[calc(max(env(safe-area-inset-bottom),1.25rem)+4rem)]">
           {showPromotions ? (
             <div className="py-3">
-              <Promotions />
+              <Promotions wholesale={catalog.wholesale} />
             </div>
           ) : (
             <>

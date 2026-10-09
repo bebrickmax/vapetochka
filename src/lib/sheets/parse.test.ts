@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { demoSheets } from "@/data/demo-sheets";
-import { buildCatalog } from "@/lib/catalog";
+import { buildCatalog, buildWholesale } from "@/lib/catalog";
 import { parseCsv } from "./csv";
 import { parsePrice, parseSheet, parseStatus, parseStrength, splitItemName } from "./parse";
 
@@ -154,5 +154,19 @@ describe("parseCsv", () => {
       ["a", "b, c", 'd "e"'],
       ["", "x\ny", ""],
     ]);
+  });
+});
+
+describe("buildWholesale", () => {
+  it("parses a price-list sheet into groups", () => {
+    const w = buildWholesale({ title: "ОПТ", rows: [["Skala — от 10 шт."], ["8 BYN"], ["", "Любые вкусы", "✅"]] });
+    expect(w?.groups).toHaveLength(1);
+    expect(w?.groups[0].items[0]).toMatchObject({ name: "Любые вкусы", price: 8, status: "in" });
+  });
+
+  it("falls back to plain text lines and skips empty sheets", () => {
+    const w = buildWholesale({ title: "ОПТ", rows: [["Опт от 100 BYN"], [], ["Скидка 10% от 300 BYN"]] });
+    expect(w).toEqual({ groups: [], lines: ["Опт от 100 BYN", "Скидка 10% от 300 BYN"] });
+    expect(buildWholesale({ title: "ОПТ", rows: [[], []] })).toBeUndefined();
   });
 });

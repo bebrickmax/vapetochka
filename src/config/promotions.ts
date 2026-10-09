@@ -13,7 +13,7 @@ export interface PromoSection {
   promos: Promo[];
 }
 
-/** Тексты вкладки «Акции и Доп». */
+/** Тексты вкладки «Акции и ОПТ» (раздел «Акции»). */
 export const promoSections: PromoSection[] = [
   {
     id: "liquids",
