@@ -20,6 +20,9 @@
   --animate-card-in: card-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-fade-in: fade-in 0.25s ease-out both;
   --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+  --animate-sheet-in: sheet-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-panel-in: panel-in 0.32s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-pop-in: pop-in 0.3s cubic-bezier(0.3, 1.4, 0.5, 1) both;
 
   @keyframes card-in {
     from {
@@ -37,6 +40,32 @@
     }
     to {
       opacity: 1;
+    }
+  }
+  @keyframes sheet-in {
+    from {
+      transform: translateY(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes panel-in {
+    from {
+      transform: translateX(100%);
+    }
+    to {
+      transform: none;
+    }
+  }
+  @keyframes pop-in {
+    from {
+      opacity: 0;
+      transform: translateY(16px) scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
   @keyframes shimmer {
