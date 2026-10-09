@@ -1,0 +1,119 @@
+@import "tailwindcss";
+
+@theme {
+  --color-bg: #07070c;
+  --color-surface: #11111a;
+  --color-surface-2: #1a1a26;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-ink: #f5f5fa;
+  --color-muted: #8e8ea8;
+  --color-neon-pink: #ff3d9a;
+  --color-neon-violet: #8b5cf6;
+  --color-neon-cyan: #2ee6ff;
+  --color-neon-green: #3dff9e;
+  --color-amber: #ffc53d;
+
+  --font-sans:
+    ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial,
+    sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+
+  --animate-card-in: card-in 0.35s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-fade-in: fade-in 0.25s ease-out both;
+  --animate-shimmer: shimmer 1.4s ease-in-out infinite;
+
+  @keyframes card-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes shimmer {
+    0%,
+    100% {
+      opacity: 0.45;
+    }
+    50% {
+      opacity: 0.9;
+    }
+  }
+}
+
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@utility neon-text {
+  background: linear-gradient(90deg, var(--color-neon-pink), var(--color-neon-violet) 55%, var(--color-neon-cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility neon-button {
+  background: linear-gradient(100deg, var(--color-neon-pink), var(--color-neon-violet));
+  box-shadow:
+    0 8px 24px -10px rgb(255 61 154 / 0.7),
+    inset 0 1px 0 rgb(255 255 255 / 0.25);
+}
+
+html {
+  color-scheme: dark;
+  background: var(--color-bg);
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Мягкое неоновое свечение на фоне */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(60rem 30rem at 110% -10%, rgb(139 92 246 / 0.18), transparent 60%),
+    radial-gradient(40rem 24rem at -20% 0%, rgb(255 61 154 / 0.12), transparent 60%),
+    radial-gradient(50rem 30rem at 50% 120%, rgb(46 230 255 / 0.08), transparent 60%);
+}
+
+input[type="search"]::-webkit-search-cancel-button {
+  display: none;
+}
+
+::selection {
+  background: rgb(139 92 246 / 0.5);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
