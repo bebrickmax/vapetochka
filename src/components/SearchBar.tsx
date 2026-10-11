@@ -31,9 +31,9 @@ export function SearchBar({ value, onChange }: SearchBarProps) {
         spellCheck={false}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        placeholder="Бренд, вкус, крепость…"
+        placeholder="Бренд, вкус или крепость"
         aria-label="Поиск по каталогу"
-        className="h-12 w-full rounded-2xl border border-line bg-surface-2/90 pl-12 pr-12 text-base text-ink outline-none transition placeholder:text-muted/80 focus:border-neon-violet/60 focus:shadow-[0_0_0_4px] focus:shadow-neon-violet/15"
+        className="h-12 w-full rounded-full border border-line bg-surface pl-12 pr-12 text-base text-ink outline-none transition placeholder:text-muted focus:border-ink focus-visible:outline-none"
       />
       {value && (
         <button
@@ -43,7 +43,7 @@ export function SearchBar({ value, onChange }: SearchBarProps) {
             inputRef.current?.focus();
           }}
           aria-label="Очистить поиск"
-          className="animate-fade-in absolute right-2 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-xl text-muted transition active:scale-90 active:bg-white/10"
+          className="animate-fade-in absolute right-1.5 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full text-muted transition active:scale-90 active:bg-white/10"
         >
           <CloseIcon width={18} height={18} />
         </button>

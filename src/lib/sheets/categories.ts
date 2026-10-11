@@ -15,6 +15,7 @@ interface CategoryMeta {
 const KNOWN: Record<string, CategoryMeta> = {
   "жидкости ( salt)": { id: "liquids", title: "Жидкости", icon: "💧" },
   "жидкости (salt)": { id: "liquids", title: "Жидкости", icon: "💧" },
+  "жидкости salt": { id: "liquids", title: "Жидкости", icon: "💧" },
   жидкости: { id: "liquids", title: "Жидкости", icon: "💧" },
   "щелочь и 0": { id: "freebase", title: "Щелочь", icon: "🧪" },
   щелочь: { id: "freebase", title: "Щелочь", icon: "🧪" },

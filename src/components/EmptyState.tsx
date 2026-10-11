@@ -2,6 +2,7 @@
 
 import { telegramLink } from "@/lib/telegram";
 import { TelegramIcon } from "./icons";
+import { LogoMark } from "./Logo";
 import { TelegramAnchor } from "./TelegramAnchor";
 
 interface EmptyStateProps {
@@ -17,12 +18,10 @@ export function EmptyState({ query, hiddenOutOfStock, onShowAll }: EmptyStatePro
     : "Здравствуйте! Помогите подобрать товар.";
 
   return (
-    <div className="animate-fade-in flex flex-col items-center gap-4 rounded-3xl border border-dashed border-line px-6 py-12 text-center">
-      <div className="text-5xl" aria-hidden>
-        🔍
-      </div>
+    <div className="animate-fade-in flex flex-col items-center gap-4 rounded-[26px] border border-dashed border-line-strong px-6 py-12 text-center">
+      <LogoMark className="h-14 w-auto text-white/20" />
       <div className="space-y-1">
-        <p className="text-lg font-bold">
+        <p className="font-wide text-lg font-semibold">
           {hiddenOutOfStock > 0 ? "Сейчас нет в наличии" : "Ничего не нашли"}
         </p>
         <p className="text-sm text-muted">
@@ -36,14 +35,14 @@ export function EmptyState({ query, hiddenOutOfStock, onShowAll }: EmptyStatePro
           <button
             type="button"
             onClick={onShowAll}
-            className="h-11 rounded-2xl border border-line bg-surface-2 text-sm font-semibold transition active:scale-[0.97]"
+            className="h-11 rounded-full border border-line-strong text-sm font-semibold transition active:scale-[0.97]"
           >
             Показать ожидаемые ({hiddenOutOfStock})
           </button>
         )}
         <TelegramAnchor
           link={telegramLink(message)}
-          className="neon-button flex h-11 items-center justify-center gap-2 rounded-2xl text-sm font-bold text-white transition active:scale-[0.97]"
+          className="btn-paper flex h-11 items-center justify-center gap-2 rounded-full text-sm font-bold transition active:scale-[0.97]"
         >
           <TelegramIcon width={18} height={18} />
           Спросить менеджера

@@ -1,13 +1,16 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { cacheConfig, sheetsConfig } from "@/config/site";
+import { getStore, type Store } from "@/config/stores";
 import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
+import { assignFamilies } from "@/lib/brands";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
-import { fetchSheetByTitle, fetchViaApi, fetchViaCsv } from "@/lib/sheets/sources";
+import { fetchStoreSheets, type StoreSheets } from "@/lib/sheets/sources";
+import { parseWholesaleSheet } from "@/lib/sheets/wholesale";
 import type { Catalog, CatalogSource, Category, ProductGroup, RawSheet, Wholesale } from "@/lib/types";
 
-/** Превращает сырые листы в каталог: категории (в порядке листов) + группы товаров. */
-export function buildCatalog(sheets: RawSheet[], source: CatalogSource): Catalog {
+/** Превращает сырые листы в каталог: категории (в порядке листов) + линейки товаров. */
+export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId = "main"): Catalog {
   const categories: Category[] = [];
   const groups: ProductGroup[] = [];
   const usedIds = new Set<string>();
@@ -15,65 +18,46 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource): Catalog
   for (const sheet of sheets) {
     const category = categoryFromSheet(sheet.title);
     if (usedIds.has(category.id)) category.id = `${category.id}-${usedIds.size}`;
-    const parsed = parseSheet(sheet.rows, category.id);
+    const parsed = parseSheet(sheet.rows, category.id, sheet.images);
     if (parsed.length === 0) continue; // пустые листы не показываем
     usedIds.add(category.id);
     categories.push(category);
-    groups.push(...parsed);
+
+    const families = assignFamilies(parsed);
+    parsed.forEach((group, index) => {
+      groups.push({ ...group, id: `${category.id}-${index}`, family: families[index] });
+    });
   }
 
-  return { categories, groups, updatedAt: new Date().toISOString(), source };
+  return { storeId, categories, groups, updatedAt: new Date().toISOString(), source };
 }
 
-/** Лист «ОПТ» → оптовые позиции; если он не похож на прайс — просто строки текста. */
+/** Лист «ОПТ» → оптовые цены по ступеням; если он не похож на прайс — просто строки текста. */
 export function buildWholesale(sheet: RawSheet): Wholesale | undefined {
-  const groups = parseSheet(sheet.rows, "wholesale");
-  const lines = groups.length
-    ? []
-    : sheet.rows
-        .map((row) =>
-          row
-            .map((c) => String(c ?? "").trim())
-            .filter(Boolean)
-            .join(" · "),
-        )
-        .filter(Boolean);
-  return groups.length || lines.length ? { groups, lines } : undefined;
+  return parseWholesaleSheet(sheet.rows, sheet.images);
 }
 
-async function loadWholesale(source: CatalogSource): Promise<Wholesale | undefined> {
-  const title = sheetsConfig.wholesaleSheet.trim();
-  if (!title) return undefined;
-  if (source === "demo") return buildWholesale(demoWholesaleSheet);
-  try {
-    return buildWholesale(await fetchSheetByTitle(title));
-  } catch (error) {
-    // Раздел ОПТ необязательный: без него каталог всё равно должен работать.
-    console.warn(`[catalog] Лист «${title}» недоступен:`, error);
-    return undefined;
-  }
-}
-
-async function loadSheets(): Promise<{ sheets: RawSheet[]; source: CatalogSource }> {
-  if (process.env.CATALOG_SOURCE === "demo") return { sheets: demoSheets, source: "demo" };
+async function loadSheets(store: Store): Promise<StoreSheets & { source: CatalogSource }> {
+  const demo = { sheets: demoSheets, wholesale: demoWholesaleSheet, source: "demo" as const };
+  if (process.env.CATALOG_SOURCE === "demo") return demo;
 
   try {
-    if (sheetsConfig.apiKey) return { sheets: await fetchViaApi(), source: "api" };
-    return { sheets: await fetchViaCsv(), source: "csv" };
+    const data = await fetchStoreSheets(store);
+    return { ...data, source: sheetsConfig.apiKey ? "api" : "csv" };
   } catch (error) {
     // В продакшене падаем: Next.js продолжит показывать последнюю удачную версию.
     if (process.env.NODE_ENV === "production") throw error;
-    console.warn("[catalog] Google Таблица недоступна, показываю демо-данные:", error);
-    return { sheets: demoSheets, source: "demo" };
+    console.warn(`[catalog] Таблица «${store.title}» недоступна, показываю демо-данные:`, error);
+    return demo;
   }
 }
 
 /**
- * Каталог с кэшем (ISR): страница отдаётся мгновенно из кэша, а раз в
+ * Каталог точки с кэшем: страница отдаётся мгновенно из кэша, а раз в
  * `revalidateSeconds` таблица перечитывается в фоне. Кнопка/скрипт
  * /api/revalidate сбрасывает кэш сразу.
  */
-export async function getCatalog(): Promise<Catalog> {
+export async function getCatalog(storeId: string): Promise<Catalog> {
   "use cache";
   cacheTag(cacheConfig.tag);
   cacheLife({
@@ -82,8 +66,11 @@ export async function getCatalog(): Promise<Catalog> {
     expire: 60 * 60 * 24 * 7,
   });
 
-  const { sheets, source } = await loadSheets();
-  const catalog = buildCatalog(sheets, source);
-  const wholesale = await loadWholesale(source);
+  const store = getStore(storeId);
+  if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
+
+  const { sheets, wholesale: wholesaleSheet, source } = await loadSheets(store);
+  const catalog = buildCatalog(sheets, source, store.id);
+  const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet) : undefined;
   return wholesale ? { ...catalog, wholesale } : catalog;
 }

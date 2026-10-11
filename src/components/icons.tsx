@@ -1,4 +1,4 @@
-import type { SVGProps } from "react";
+import type { JSX, SVGProps } from "react";
 
 type IconProps = SVGProps<SVGSVGElement>;
 
@@ -124,4 +124,155 @@ export function CheckIcon(props: IconProps) {
       <path d="m5 12.5 4.5 4.5L19 7.5" />
     </svg>
   );
+}
+
+export function ChevronDownIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+export function ExpandIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+    </svg>
+  );
+}
+
+// ─── Иконки категорий: тонкие монохромные глифы вместо цветных эмодзи ─────────
+
+const glyph = { ...base, strokeWidth: 1.8 } as const;
+
+function DropGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M12 3.5c3.2 4 5.5 7.2 5.5 10.2a5.5 5.5 0 0 1-11 0c0-3 2.3-6.2 5.5-10.2Z" />
+      <path d="M9.5 14.5a2.6 2.6 0 0 0 2.5 2.3" />
+    </svg>
+  );
+}
+
+function BoltGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M13 3 5.5 13.5H11L10 21l7.5-10.5H12L13 3Z" />
+    </svg>
+  );
+}
+
+function PodGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <rect x="7.5" y="6" width="9" height="15" rx="2.5" />
+      <path d="M10 6V3.5h4V6M12 15.5v.01" />
+    </svg>
+  );
+}
+
+function CoilGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M4 12h2.5c1.2 0 1.2-4 2.5-4s1.3 8 2.5 8 1.3-8 2.5-8 1.3 8 2.5 8 1.3-4 2.5-4H20" />
+    </svg>
+  );
+}
+
+function PuckGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <ellipse cx="12" cy="9" rx="8" ry="3.5" />
+      <path d="M4 9v5c0 1.9 3.6 3.5 8 3.5s8-1.6 8-3.5V9" />
+    </svg>
+  );
+}
+
+function StripGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <rect x="4" y="7" width="16" height="10" rx="2" transform="rotate(-12 12 12)" />
+      <path d="M9 10.8l6-1.3M9.6 13.8l4-.9" />
+    </svg>
+  );
+}
+
+function CottonGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M7 17a3.5 3.5 0 0 1-.6-6.95A5 5 0 0 1 16 8.4a4 4 0 0 1 1 7.9" />
+      <path d="M7 17h10" />
+    </svg>
+  );
+}
+
+function HookahGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M12 3v3M9.5 6h5l-1 4h-3l-1-4ZM12 10v3" />
+      <path d="M8.5 21a3.5 4 0 1 1 7 0Z" />
+      <path d="M15.5 16c2 0 3.5-1 4.5-3" />
+    </svg>
+  );
+}
+
+function CanGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M8 4.5h8l1 2.5v12.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 7 19.5V7l1-2.5Z" />
+      <path d="M7 9h10M7 17h10" />
+    </svg>
+  );
+}
+
+function TagGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M3.5 12.5V4.5a1 1 0 0 1 1-1h8l8 8-9 9-8-8Z" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+    </svg>
+  );
+}
+
+function GiftGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <rect x="3.5" y="8.5" width="17" height="4" rx="1" />
+      <path d="M5 12.5v7.5h14v-7.5M12 8.5V20M12 8.5C10.5 5 7 4.5 7 6.8 7 8.5 12 8.5 12 8.5ZM12 8.5c1.5-3.5 5-4 5-1.7 0 1.7-5 1.7-5 1.7Z" />
+    </svg>
+  );
+}
+
+function GridGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+      <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+      <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    </svg>
+  );
+}
+
+const CATEGORY_GLYPHS: Record<string, (props: IconProps) => JSX.Element> = {
+  all: GridGlyph,
+  promo: GiftGlyph,
+  liquids: DropGlyph,
+  freebase: DropGlyph,
+  disposables: BoltGlyph,
+  pods: PodGlyph,
+  consumables: CoilGlyph,
+  coils: CottonGlyph,
+  snus: PuckGlyph,
+  strips: StripGlyph,
+  hookah: HookahGlyph,
+  drinks: CanGlyph,
+  sale: TagGlyph,
+};
+
+/** Иконка категории по её id; для новых листов — «бирка». */
+export function CategoryIcon({ id, ...props }: IconProps & { id: string }) {
+  const Glyph = CATEGORY_GLYPHS[id.replace(/-\d+$/, "")] ?? TagGlyph;
+  return <Glyph {...props} />;
 }

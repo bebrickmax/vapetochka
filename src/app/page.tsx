@@ -1,7 +1,6 @@
-import { Catalog } from "@/components/Catalog";
-import { getCatalog } from "@/lib/catalog";
+import { StorePicker } from "@/components/StorePicker";
+import { storeInfos } from "@/config/stores";
 
-export default async function HomePage() {
-  const catalog = await getCatalog();
-  return <Catalog catalog={catalog} />;
+export default function HomePage() {
+  return <StorePicker stores={storeInfos} />;
 }

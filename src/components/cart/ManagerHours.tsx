@@ -20,8 +20,8 @@ export function ManagerHours() {
   );
 
   return (
-    <div className="flex items-center gap-3 rounded-2xl border border-neon-cyan/25 bg-neon-cyan/[0.07] px-3.5 py-3">
-      <ClockIcon className="shrink-0 text-neon-cyan" />
+    <div className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3">
+      <ClockIcon className="shrink-0 text-ink" />
       <div className="min-w-0 text-sm leading-snug">
         <p className="font-semibold text-ink">
           Время работы менеджера:{" "}
@@ -31,11 +31,11 @@ export function ManagerHours() {
         </p>
         {online !== null && (
           <p
-            className={`mt-0.5 flex items-center gap-1.5 text-xs font-semibold ${online ? "text-neon-green" : "text-muted"}`}
+            className={`mt-0.5 flex items-center gap-1.5 text-xs font-semibold ${online ? "text-ink" : "text-muted"}`}
           >
             <span
               aria-hidden
-              className={`size-1.5 rounded-full ${online ? "bg-neon-green shadow-[0_0_8px_1px] shadow-neon-green/60" : "bg-muted/70"}`}
+              className={`size-2 rounded-full ${online ? "bg-paper" : "border border-muted"}`}
             />
             {online ? "Сейчас на связи" : `Сейчас не в сети — ответит с ${managerHours.from}`}
           </p>

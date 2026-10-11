@@ -9,7 +9,6 @@ export interface Promo {
 export interface PromoSection {
   id: string;
   title: string;
-  icon: string;
   promos: Promo[];
 }
 
@@ -18,7 +17,6 @@ export const promoSections: PromoSection[] = [
   {
     id: "liquids",
     title: "Жидкости, испарители, картриджи",
-    icon: "💧",
     promos: [
       {
         formula: "1+1=3",
@@ -70,7 +68,6 @@ export const promoSections: PromoSection[] = [
   {
     id: "snus",
     title: "Шайбы",
-    icon: "🟢",
     promos: [
       { formula: "1+1=3", text: "При покупке 2 любых шайб получаете подарочный энергетик случайного вкуса." },
       {
@@ -86,7 +83,6 @@ export const promoSections: PromoSection[] = [
   {
     id: "strips",
     title: "Пластинки (strips)",
-    icon: "🍬",
     promos: [
       {
         formula: "1+1=3",
@@ -97,7 +93,6 @@ export const promoSections: PromoSection[] = [
   {
     id: "disposables",
     title: "Одноразки",
-    icon: "⚡",
     promos: [
       {
         formula: "1+1=3",
@@ -124,7 +119,6 @@ export const promoSections: PromoSection[] = [
   {
     id: "pods",
     title: "POD-системы",
-    icon: "📱",
     promos: [
       {
         text: "К каждой POD-системе идёт гарантия 100 дней и подарочная банка жидкости случайного производителя и вкуса.",

@@ -106,6 +106,7 @@ export function buildHaystack(product: Product, category?: Category): string {
   return normalize(
     [
       product.brand,
+      product.family,
       product.line,
       product.name,
       product.description,

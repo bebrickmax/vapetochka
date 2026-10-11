@@ -1,20 +1,24 @@
 import type { Product, ProductGroup } from "@/lib/types";
 
-/** Разворачивает группы в плоский список карточек. */
+/** Позиция линейки как отдельный товар (для корзины и поиска). */
+export function toProduct(group: ProductGroup, itemIndex: number): Product {
+  const item = group.items[itemIndex];
+  return {
+    ...item,
+    id: `${group.id}-${itemIndex}`,
+    groupId: group.id,
+    categoryId: group.categoryId,
+    line: group.line,
+    ...(group.brand && { brand: group.brand }),
+    ...(group.family && { family: group.family }),
+    ...(group.strength && { strength: group.strength }),
+    ...(group.note && { note: group.note }),
+  };
+}
+
+/** Разворачивает группы в плоский список позиций. */
 export function flattenGroups(groups: ProductGroup[]): Product[] {
-  const products: Product[] = [];
-  groups.forEach((group, groupIndex) => {
-    const { items, ...groupFields } = group;
-    items.forEach((item, itemIndex) => {
-      products.push({
-        ...groupFields,
-        ...item,
-        strength: group.strength,
-        id: `${group.categoryId}-${groupIndex}-${itemIndex}`,
-      });
-    });
-  });
-  return products;
+  return groups.flatMap((group) => group.items.map((_, itemIndex) => toProduct(group, itemIndex)));
 }
 
 /** Человекочитаемое название позиции для заказа: "Skala 20mg — Банан со льдом (0.6 Ом)". */
