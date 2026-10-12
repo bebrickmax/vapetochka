@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Manrope, Unbounded } from "next/font/google";
 import type { ReactNode } from "react";
+import { Intro, INTRO_SCRIPT } from "@/components/Intro";
 import { siteConfig } from "@/config/site";
 import "./globals.css";
 
@@ -37,8 +38,15 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="ru" className={`dark ${wide.variable} ${body.variable}`}>
-      <body className="min-h-dvh">{children}</body>
+    // suppressHydrationWarning: скрипт заставки добавляет класс no-intro до загрузки React.
+    <html lang="ru" className={`dark ${wide.variable} ${body.variable}`} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: INTRO_SCRIPT }} />
+      </head>
+      <body className="min-h-dvh">
+        <Intro />
+        {children}
+      </body>
     </html>
   );
 }
