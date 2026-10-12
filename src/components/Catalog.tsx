@@ -23,6 +23,7 @@ import { SearchBar } from "./SearchBar";
 import { StockToggle } from "./StockToggle";
 import { StoreSwitcher } from "./StoreSwitcher";
 import { TelegramAnchor } from "./TelegramAnchor";
+import { Toaster } from "./Toaster";
 
 const ALL = "all";
 const PROMO = "promo";
@@ -305,6 +306,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
 
           <FloatingCart />
           <CartDrawer store={store} />
+          <Toaster />
         </div>
       </PhotoViewerProvider>
     </CartProvider>

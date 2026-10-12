@@ -17,7 +17,7 @@ import {
 import { formatPrice, pluralize } from "@/lib/format";
 import { telegramLink } from "@/lib/telegram";
 import { ArrowLeftIcon, CartIcon, CheckIcon, CloseIcon, TelegramIcon, TrashIcon } from "../icons";
-import { openTelegram } from "../TelegramAnchor";
+import { copyText, openTelegram } from "../TelegramAnchor";
 import { useCart, useCartActions, useCartDrawer } from "./CartProvider";
 import { ManagerHours } from "./ManagerHours";
 import { QtyStepper } from "./QtyStepper";
@@ -53,6 +53,8 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
   const [submitted, setSubmitted] = useState(false);
   const [sentText, setSentText] = useState("");
   const [copied, setCopied] = useState(false);
+  /** На компьютере чат открывается без текста — его нужно вставить. */
+  const [needsPaste, setNeedsPaste] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -77,14 +79,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
   const errors = validateCheckout(items, form);
   const valid = Object.keys(errors).length === 0;
 
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
+  const copy = async (text: string) => setCopied(await copyText(text));
 
   const send = () => {
     setSubmitted(true);
@@ -96,7 +91,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
     setSentText(text);
     void copy(text); // запасной вариант: если Telegram не подставит текст — его можно вставить
     go("sent");
-    openTelegram(telegramLink(text));
+    setNeedsPaste(openTelegram(telegramLink(text), { silent: true }));
   };
 
   const finish = () => {
@@ -136,7 +131,9 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
           {view === "checkout" && (
             <CheckoutFields store={store} form={form} setForm={setForm} errors={submitted ? errors : {}} />
           )}
-          {view === "sent" && <SentView text={sentText} copied={copied} onCopy={() => copy(sentText)} />}
+          {view === "sent" && (
+            <SentView text={sentText} copied={copied} needsPaste={needsPaste} onCopy={() => copy(sentText)} />
+          )}
         </div>
 
         {/* Низ панели: итог и главная кнопка */}
@@ -156,7 +153,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
           )}
           {view === "sent" && (
             <>
-              <PrimaryButton onClick={() => openTelegram(telegramLink(sentText))}>
+              <PrimaryButton onClick={() => setNeedsPaste(openTelegram(telegramLink(sentText), { silent: true }))}>
                 <TelegramIcon />
                 Открыть чат с менеджером
               </PrimaryButton>
@@ -389,14 +386,22 @@ function CheckoutFields({ store, form, setForm, errors }: CheckoutFieldsProps) {
   );
 }
 
-function SentView({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
+interface SentViewProps {
+  text: string;
+  copied: boolean;
+  needsPaste: boolean;
+  onCopy: () => void;
+}
+
+function SentView({ text, copied, needsPaste, onCopy }: SentViewProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 rounded-2xl border border-line-strong px-3.5 py-3">
         <CheckIcon className="shrink-0 text-ink" />
         <p className="text-sm leading-snug text-ink">
-          Открываем чат с менеджером. Если текст заказа не подставился сам — вставьте его в чат
-          {copied ? " (он уже скопирован)" : ""} и отправьте.
+          {needsPaste
+            ? `Открываем чат с менеджером. ${copied ? "Текст заказа уже скопирован — вставьте" : "Скопируйте текст заказа и вставьте"} его в поле сообщения (⌘V или Ctrl+V) и отправьте.`
+            : `Открываем чат с менеджером. Если текст заказа не подставился сам — вставьте его в чат${copied ? " (он уже скопирован)" : ""} и отправьте.`}
         </p>
       </div>
       <pre className="whitespace-pre-wrap break-words rounded-2xl border border-line bg-surface p-3.5 font-sans text-sm leading-relaxed text-ink/90">
