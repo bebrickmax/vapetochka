@@ -6,6 +6,7 @@ import { displayLine, toProduct } from "@/lib/products";
 import { orderMessage, telegramLink } from "@/lib/telegram";
 import type { Category, ProductGroup, ProductItem } from "@/lib/types";
 import { AddToCart } from "./cart/AddToCart";
+import { FavoriteButton } from "./Favorites";
 import { BellIcon, CategoryIcon, ChevronDownIcon } from "./icons";
 import { ProductPhoto } from "./ProductPhoto";
 import { TelegramAnchor } from "./TelegramAnchor";
@@ -70,15 +71,20 @@ function LineCardBase({ group, visible, category, expanded = false, hideFamily =
           className="h-[118px] w-[92px] shrink-0"
         />
         <div className="flex min-w-0 flex-1 flex-col">
-          {(category || above) && (
-            <p className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-muted">
-              {category && <CategoryIcon id={category.id} width={15} height={15} className="shrink-0" />}
-              <span className="truncate">{[category?.title, above].filter(Boolean).join(", ")}</span>
-            </p>
-          )}
-          <h3 className="font-wide mt-0.5 text-[17px] font-semibold leading-[1.2] text-ink [overflow-wrap:anywhere]">
-            {title}
-          </h3>
+          <div className="flex items-start gap-2">
+            <div className="min-w-0 flex-1">
+              {(category || above) && (
+                <p className="flex min-w-0 items-center gap-1.5 text-[13px] font-semibold text-muted">
+                  {category && <CategoryIcon id={category.id} width={15} height={15} className="shrink-0" />}
+                  <span className="truncate">{[category?.title, above].filter(Boolean).join(", ")}</span>
+                </p>
+              )}
+              <h3 className="font-wide mt-0.5 text-[17px] font-semibold leading-[1.2] text-ink [overflow-wrap:anywhere]">
+                {title}
+              </h3>
+            </div>
+            <FavoriteButton id={group.id} title={group.line} />
+          </div>
           {(group.strength || group.section || group.note) && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {group.strength && <Chip strong>{group.strength}</Chip>}

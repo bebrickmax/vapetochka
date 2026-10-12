@@ -75,6 +75,7 @@ function createCartStore(storeId: string) {
 type CartStore = ReturnType<typeof createCartStore>;
 
 interface CartUi {
+  storeId: string;
   store: CartStore;
   live?: Map<string, LiveProduct>;
   open: boolean;
@@ -93,7 +94,7 @@ interface CartProviderProps {
 export function CartProvider({ storeId, live, children }: CartProviderProps) {
   const [store] = useState(() => createCartStore(storeId));
   const [open, setOpen] = useState(false);
-  const value = useMemo(() => ({ store, live, open, setOpen }), [store, live, open]);
+  const value = useMemo(() => ({ storeId, store, live, open, setOpen }), [storeId, store, live, open]);
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
@@ -115,6 +116,8 @@ export function useCartActions() {
       setQty: (item: Omit<CartItem, "qty">, qty: number) => store.update((items) => setQty(items, item, qty)),
       remove: (id: string) => store.update((items) => items.filter((i) => i.id !== id)),
       clear: () => store.update(() => EMPTY),
+      /** Заменить содержимое корзины (повтор прошлого заказа). */
+      replace: (items: CartItem[]) => store.update(() => sanitizeCart(items)),
     }),
     [store],
   );
@@ -137,6 +140,27 @@ export function useCart() {
   const items = useMemo(() => refreshCart(saved, live), [saved, live]);
   const totals = useMemo(() => cartTotals(items), [items]);
   return { items, totals };
+}
+
+/** Прошлый заказ этого прайса — сохраняется при отправке, чтобы повторить в один тап. */
+export function useLastOrder() {
+  const { storeId, live } = useCartContext();
+  const key = `vt:last-order:${storeId}`;
+  const load = (): CartItem[] => {
+    try {
+      return sanitizeCart(JSON.parse(window.localStorage.getItem(key) ?? "[]"));
+    } catch {
+      return [];
+    }
+  };
+  const save = (items: CartItem[]) => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(items.map(({ id, title, price, qty }) => ({ id, title, price, qty }))));
+    } catch {
+      /* ignore */
+    }
+  };
+  return { load, save, live };
 }
 
 export function useCartDrawer() {

@@ -24,9 +24,12 @@ import { StockToggle } from "./StockToggle";
 import { StoreSwitcher } from "./StoreSwitcher";
 import { TelegramAnchor } from "./TelegramAnchor";
 import { Toaster } from "./Toaster";
+import { FavoritesProvider } from "./Favorites";
+import { favoritesKey, useLocalSet } from "@/lib/local-set";
 
 const ALL = "all";
 const PROMO = "promo";
+const FAV = "fav";
 const ALL_BRANDS = "*";
 
 interface IndexedItem {
@@ -80,6 +83,10 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
     [groups],
   );
 
+  const [favList, toggleFav] = useLocalSet(favoritesKey(store.id));
+  const favIds = useMemo(() => new Set(favList), [favList]);
+  const favorites = useMemo(() => ({ ids: favIds, toggle: toggleFav }), [favIds, toggleFav]);
+
   const [category, setCategory] = useState(categories[0]?.id ?? ALL);
   const [brand, setBrand] = useState(ALL_BRANDS);
   const [searchScope, setSearchScope] = useState(ALL);
@@ -94,7 +101,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
   useEffect(() => {
     const fromHash = decodeURIComponent(window.location.hash.slice(1));
     // eslint-disable-next-line react-hooks/set-state-in-effect -- адрес доступен только в браузере
-    if (fromHash === ALL || fromHash === PROMO || categoryMap.has(fromHash)) setCategory(fromHash);
+    if (fromHash === ALL || fromHash === PROMO || fromHash === FAV || categoryMap.has(fromHash)) setCategory(fromHash);
   }, [categoryMap]);
 
   // Позиции, прошедшие поиск и «только в наличии», — по линейкам.
@@ -128,21 +135,26 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
     const visibleTabs = searching ? categoryTabs.filter((t) => t.count > 0 || t.id === activeTab) : categoryTabs;
     const total = entries.reduce((sum, e) => sum + e.visible.length, 0);
     const showPromo = !searching || activeTab === PROMO;
+    // Избранное — первой вкладкой, как только в нём что-то есть.
+    const favCount = entries.reduce((sum, e) => sum + (favIds.has(e.group.id) ? e.visible.length : 0), 0);
+    const showFav = activeTab === FAV || (favCount > 0 && !searching);
     return [
+      ...(showFav ? [{ id: FAV, title: "Избранное", count: favCount }] : []),
       ...(showPromo ? [{ id: PROMO, title: "Акции и ОПТ" }] : []),
       ...visibleTabs,
       { id: ALL, title: "Всё сразу", count: total },
     ];
-  }, [entries, categories, searching, activeTab]);
+  }, [entries, categories, searching, activeTab, favIds]);
 
-  const inTab = useMemo(
-    () => (activeTab === ALL ? entries : entries.filter((e) => e.group.categoryId === activeTab)),
-    [entries, activeTab],
-  );
+  const inTab = useMemo(() => {
+    if (activeTab === ALL) return entries;
+    if (activeTab === FAV) return entries.filter((e) => favIds.has(e.group.id));
+    return entries.filter((e) => e.group.categoryId === activeTab);
+  }, [entries, activeTab, favIds]);
 
   // Бренды текущей категории (в порядке таблицы) — показываем, если их хотя бы два.
   const brandTabs = useMemo<TabItem[]>(() => {
-    if (searching || activeTab === ALL || activeTab === PROMO) return [];
+    if (searching || activeTab === ALL || activeTab === PROMO || activeTab === FAV) return [];
     const families = groupBy(inTab, (g) => g.family ?? "");
     if (families.length < 2) return [];
     const total = inTab.reduce((sum, e) => sum + e.visible.length, 0);
@@ -159,7 +171,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
   const activeBrand = brandTabs.some((t) => t.id === brand) ? brand : ALL_BRANDS;
 
   const sections = useMemo<LineSection[]>(() => {
-    if (activeTab === ALL) {
+    if (activeTab === ALL || activeTab === FAV) {
       return groupBy(inTab, (g) => g.categoryId).map(([id, list]) => ({
         key: id,
         title: categoryMap.get(id)?.title,
@@ -188,11 +200,13 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
     return index.filter((entry) => {
       if (entry.inStock) return false;
       const group = groups[entry.group];
-      if (activeTab !== ALL && group.categoryId !== activeTab) return false;
+      if (activeTab === FAV) {
+        if (!favIds.has(group.id)) return false;
+      } else if (activeTab !== ALL && group.categoryId !== activeTab) return false;
       if (activeBrand !== ALL_BRANDS && (group.family ?? "") !== activeBrand) return false;
       return !searching || matches(entry.haystack, parsed);
     }).length;
-  }, [index, groups, onlyInStock, hiddenByStock, deferredQuery, searching, activeTab, activeBrand]);
+  }, [index, groups, onlyInStock, hiddenByStock, deferredQuery, searching, activeTab, activeBrand, favIds]);
 
   const stickyRef = useRef<HTMLDivElement>(null);
   const scrollToListTop = () => {
@@ -225,6 +239,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
 
   return (
     <CartProvider storeId={store.id} live={liveProducts}>
+      <FavoritesProvider value={favorites}>
       <PhotoViewerProvider>
         <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col">
           {/* Шапка с логотипом — уезжает при прокрутке */}
@@ -280,11 +295,20 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
                     expanded={searching}
                   />
                 ) : (
-                  <EmptyState
-                    query={deferredQuery}
-                    hiddenOutOfStock={hiddenInTab}
-                    onShowAll={() => setOnlyInStock(false)}
-                  />
+                  activeTab === FAV && hiddenInTab === 0 && !searching ? (
+                    <div className="animate-fade-in rounded-[26px] border border-dashed border-line-strong px-6 py-12 text-center">
+                      <p className="font-wide text-lg font-semibold">В избранном пусто</p>
+                      <p className="mx-auto mt-1 max-w-72 text-sm text-muted">
+                        Нажмите ♡ на карточке линейки — она появится здесь, чтобы не искать её каждый раз.
+                      </p>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      query={deferredQuery}
+                      hiddenOutOfStock={hiddenInTab}
+                      onShowAll={() => setOnlyInStock(false)}
+                    />
+                  )
                 )}
               </>
             )}
@@ -323,6 +347,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
           <Toaster />
         </div>
       </PhotoViewerProvider>
+      </FavoritesProvider>
     </CartProvider>
   );
 }

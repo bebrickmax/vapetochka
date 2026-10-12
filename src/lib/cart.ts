@@ -38,6 +38,27 @@ export function refreshCart(items: CartItem[], live: Map<string, LiveProduct> | 
   return changed ? next : items;
 }
 
+/**
+ * Прошлый заказ → позиции для корзины: только то, что сейчас есть в наличии,
+ * со свежими ценами. `missing` — сколько позиций закончилось.
+ */
+export function repeatOrder(
+  last: CartItem[],
+  live: Map<string, LiveProduct> | undefined,
+): { items: CartItem[]; missing: number } {
+  const items: CartItem[] = [];
+  let missing = 0;
+  for (const item of last) {
+    const product = live?.get(item.id);
+    if (!product || !product.inStock) {
+      missing++;
+      continue;
+    }
+    items.push({ id: item.id, title: product.title, price: product.price, qty: item.qty });
+  }
+  return { items, missing };
+}
+
 /** Позиции, которые можно заказать. */
 export const availableItems = (items: CartItem[]) => items.filter((item) => !item.unavailable);
 
