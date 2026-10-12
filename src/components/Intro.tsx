@@ -1,18 +1,30 @@
-import { LOGO_VIEWBOX, MARK_PATH, WORDMARK_PATH } from "@/config/logo";
+import { MARK_PATH, WORDMARK_PATH } from "@/config/logo";
 
 /**
- * Заставка при входе: знак-«точка» всплывает, рядом выезжает надпись,
- * затем логотип увеличивается и растворяется — открывается сайт.
- * Чистый CSS (стили — .intro в globals.css), сайт под ней грузится параллельно.
- * Показывается один раз за визит: скрипт INTRO_SCRIPT ставит класс no-intro.
+ * Заставка при входе: знак-«точка» всплывает крупно по центру, плавно отъезжает
+ * на своё место, выезжает надпись, затем логотип увеличивается и растворяется.
+ *
+ * Анимируются только transform и opacity обычных блоков (не частей SVG) —
+ * их рисует видеокарта, поэтому движение плавное, даже пока грузится сайт.
+ * Стили — .intro в globals.css. Показывается один раз за визит (INTRO_SCRIPT).
  */
 export function Intro() {
   return (
     <div className="intro" aria-hidden>
-      <svg className="intro-logo" viewBox={LOGO_VIEWBOX} fill="#ffffff">
-        <path className="intro-mark" fillRule="evenodd" d={MARK_PATH} />
-        <path className="intro-word" fillRule="evenodd" d={WORDMARK_PATH} />
-      </svg>
+      <div className="intro-logo">
+        <div className="intro-glide">
+          <div className="intro-mark">
+            <svg viewBox="15 194 149 232" fill="#ffffff">
+              <path fillRule="evenodd" d={MARK_PATH} />
+            </svg>
+          </div>
+        </div>
+        <div className="intro-word">
+          <svg viewBox="207 194 415 232" fill="#ffffff">
+            <path fillRule="evenodd" d={WORDMARK_PATH} />
+          </svg>
+        </div>
+      </div>
     </div>
   );
 }

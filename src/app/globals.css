@@ -144,6 +144,10 @@ input[type="search"]::-webkit-search-cancel-button {
 }
 
 /* ─── Заставка при входе ─────────────────────────────────────────────────── */
+/*
+ * Логотип 607×232 (единицы viewBox): знак — 149 шириной слева,
+ * надпись — с 192 по 607. Все движения — transform/opacity блоков.
+ */
 
 .intro {
   position: fixed;
@@ -153,44 +157,65 @@ input[type="search"]::-webkit-search-cancel-button {
   align-items: center;
   justify-content: center;
   background: #000;
-  animation: intro-out 0.6s cubic-bezier(0.7, 0, 0.2, 1) 1.25s forwards;
+  animation: intro-out 0.6s cubic-bezier(0.7, 0, 0.2, 1) 1.45s forwards;
 }
 
 .intro-logo {
+  position: relative;
   width: min(72vw, 420px);
-  height: auto;
-  overflow: visible;
-  animation: intro-zoom 0.65s cubic-bezier(0.7, 0, 0.2, 1) 1.2s forwards;
+  aspect-ratio: 607 / 232;
+  will-change: transform, opacity;
+  animation: intro-zoom 0.65s cubic-bezier(0.7, 0, 0.2, 1) 1.4s forwards;
 }
 
-.intro-mark,
-.intro-word {
-  transform-box: fill-box;
-  transform-origin: center;
+.intro-logo svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Сдвиг знака к центру логотипа: (318.5 − 89.5) / 149 ширины знака. */
+.intro-glide {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 24.55%;
+  will-change: transform;
+  animation: intro-glide 0.6s cubic-bezier(0.55, 0, 0.25, 1) 0.42s both;
 }
 
 .intro-mark {
-  animation: intro-mark 0.95s cubic-bezier(0.3, 0.9, 0.3, 1) both;
+  height: 100%;
+  will-change: transform, opacity;
+  animation: intro-mark 1.02s linear both;
 }
 
 .intro-word {
-  animation: intro-word 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.55s both;
+  position: absolute;
+  inset: 0 0 0 31.63%;
+  will-change: transform, opacity;
+  animation: intro-word 0.5s cubic-bezier(0.2, 0.8, 0.2, 1) 0.8s both;
 }
 
-/* Знак всплывает крупно по центру экрана (229 — сдвиг от центра логотипа), затем встаёт на место. */
+@keyframes intro-glide {
+  from {
+    transform: translateX(153.7%);
+  }
+  to {
+    transform: none;
+  }
+}
+
+/* Всплывает и подрастает, затем — тем же движением, что и отъезд, — уменьшается до размера. */
 @keyframes intro-mark {
   0% {
     opacity: 0;
-    transform: translate(229px, 34px) scale(0.5);
-    filter: blur(10px);
+    transform: translateY(22%) scale(0.55);
+    animation-timing-function: cubic-bezier(0.2, 0.75, 0.25, 1);
   }
-  45% {
+  41% {
     opacity: 1;
-    transform: translate(229px, 0) scale(1.35);
-    filter: blur(0);
-  }
-  60% {
-    transform: translate(229px, 0) scale(1.35);
+    transform: translateY(0) scale(1.32);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.25, 1);
   }
   100% {
     opacity: 1;
@@ -201,13 +226,11 @@ input[type="search"]::-webkit-search-cancel-button {
 @keyframes intro-word {
   from {
     opacity: 0;
-    transform: translateX(-28px);
-    clip-path: inset(0 100% 0 0);
+    transform: translateX(-14%);
   }
   to {
     opacity: 1;
     transform: none;
-    clip-path: inset(0 0 0 0);
   }
 }
 
