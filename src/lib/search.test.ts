@@ -16,6 +16,27 @@ const search = (q: string) => {
   return index.filter(({ hay }) => matches(hay, query)).map(({ p }) => productTitle(p));
 };
 
+describe("product ids", () => {
+  it("do not depend on row numbers", () => {
+    const rows = (extra: string[][]) => [
+      ...extra,
+      ["Skala 20mg"],
+      ["11 BYN"],
+      ["", "Банан", "✅"],
+      ["", "Вишня", "✅"],
+    ];
+    const ids = (sheetRows: string[][]) =>
+      flattenGroups(buildCatalog([{ title: "Жидкости", rows: sheetRows }], "demo").groups)
+        .filter((p) => p.line === "Skala 20mg")
+        .map((p) => [p.name, p.id]);
+    const before = ids(rows([]));
+    // Сверху добавили новую линейку — id позиций Skala не меняются.
+    const after = ids(rows([["Duall 20mg"], ["12 BYN"], ["", "Арбуз", "✅"], []]));
+    expect(after).toEqual(before);
+    expect(new Set(before.map(([, id]) => id)).size).toBe(2);
+  });
+});
+
 describe("search", () => {
   it("finds by brand, flavor and strength in any order", () => {
     expect(search("skala банан")).toEqual(["Skala 20mg — Банан со льдом"]);

@@ -35,8 +35,8 @@ export interface Store {
 export const stores: readonly Store[] = [
   {
     id: "main",
-    title: "Основной склад",
-    short: "Основной",
+    title: "Общий прайс-лист",
+    short: "Общий прайс",
     subtitle: "Метро, самовывоз и доставка по Минску",
     icon: "🏙️",
     spreadsheetId: process.env.GOOGLE_SHEET_ID || "1T3SgqBTTdbUlBjC4UnRKk0G8mbqJK-5RJigP7azr3Rc",

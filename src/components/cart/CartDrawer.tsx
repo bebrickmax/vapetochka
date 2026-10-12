@@ -139,7 +139,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
         {/* Низ панели: итог и главная кнопка */}
         <div className="space-y-3 border-t border-line px-4 pb-[max(env(safe-area-inset-bottom),1rem)] pt-3">
           {view !== "sent" && items.length > 0 && <TotalsRow totals={totals} />}
-          {view === "cart" && items.length > 0 && (
+          {view === "cart" && totals.count > 0 && (
             <PrimaryButton onClick={() => go("checkout")}>Оформить заказ</PrimaryButton>
           )}
           {view === "checkout" && (
@@ -174,6 +174,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
 
 function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void }) {
   const { setQty, remove } = useCartActions();
+  const unavailable = items.filter((item) => item.unavailable);
 
   if (items.length === 0) {
     return (
@@ -198,9 +199,14 @@ function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void
         {items.map((item) => {
           const total = lineTotal(item);
           return (
-            <li key={item.id} className="rounded-2xl border border-line bg-surface p-3">
+            <li
+              key={item.id}
+              className={`rounded-2xl border p-3 ${item.unavailable ? "border-dashed border-line-strong" : "border-line bg-surface"}`}
+            >
               <div className="flex items-start gap-2">
-                <p className="flex-1 text-[15px] font-semibold leading-snug text-ink">{item.title}</p>
+                <p className={`flex-1 text-[15px] font-semibold leading-snug ${item.unavailable ? "text-muted" : "text-ink"}`}>
+                  {item.title}
+                </p>
                 <button
                   type="button"
                   onClick={() => remove(item.id)}
@@ -210,29 +216,44 @@ function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void
                   <TrashIcon width={17} height={17} />
                 </button>
               </div>
-              <div className="mt-2 flex items-center justify-between gap-3">
-                <QtyStepper
-                  size="sm"
-                  qty={item.qty}
-                  label={item.title}
-                  onChange={(qty) => setQty(item, qty)}
-                  className="w-32"
-                />
-                <div className="text-right">
-                  <p className="font-wide text-[15px] font-semibold tabular-nums">
-                    {total === null ? "Цена по запросу" : formatPrice(total)}
-                  </p>
-                  {item.price !== null && item.qty > 1 && (
-                    <p className="text-xs text-muted tabular-nums">
-                      {formatPrice(item.price)} × {item.qty}
+              {item.unavailable ? (
+                <p className="mt-1.5 text-[13px] leading-snug text-muted">
+                  Закончилась или убрана из прайса — в заказ не попадёт.
+                </p>
+              ) : (
+                <div className="mt-2 flex items-center justify-between gap-3">
+                  <QtyStepper
+                    size="sm"
+                    qty={item.qty}
+                    label={item.title}
+                    onChange={(qty) => setQty(item, qty)}
+                    className="w-32"
+                  />
+                  <div className="text-right">
+                    <p className="font-wide text-[15px] font-semibold tabular-nums">
+                      {total === null ? "Цена по запросу" : formatPrice(total)}
                     </p>
-                  )}
+                    {item.price !== null && item.qty > 1 && (
+                      <p className="text-xs text-muted tabular-nums">
+                        {formatPrice(item.price)} × {item.qty}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </li>
           );
         })}
       </ul>
+      {unavailable.length > 0 && (
+        <button
+          type="button"
+          onClick={() => unavailable.forEach((item) => remove(item.id))}
+          className="h-11 w-full rounded-full border border-line-strong text-sm font-semibold transition active:scale-[0.98]"
+        >
+          Убрать недоступные ({unavailable.length})
+        </button>
+      )}
       <ManagerHours />
     </div>
   );

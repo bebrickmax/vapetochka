@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { DEFAULT_STORE_ID } from "@/config/stores";
-import { cartTotals, sanitizeCart, setQty, type CartItem } from "@/lib/cart";
+import { cartTotals, refreshCart, sanitizeCart, setQty, type CartItem, type LiveProduct } from "@/lib/cart";
 
 const LEGACY_KEY = "vt:cart";
 const EMPTY: CartItem[] = [];
@@ -76,16 +76,24 @@ type CartStore = ReturnType<typeof createCartStore>;
 
 interface CartUi {
   store: CartStore;
+  live?: Map<string, LiveProduct>;
   open: boolean;
   setOpen: (open: boolean) => void;
 }
 
 const CartContext = createContext<CartUi | null>(null);
 
-export function CartProvider({ storeId, children }: { storeId: string; children: ReactNode }) {
+interface CartProviderProps {
+  storeId: string;
+  /** Актуальные товары из таблицы: корзина берёт из них цены и наличие. */
+  live?: Map<string, LiveProduct>;
+  children: ReactNode;
+}
+
+export function CartProvider({ storeId, live, children }: CartProviderProps) {
   const [store] = useState(() => createCartStore(storeId));
   const [open, setOpen] = useState(false);
-  const value = useMemo(() => ({ store, open, setOpen }), [store, open]);
+  const value = useMemo(() => ({ store, live, open, setOpen }), [store, live, open]);
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
 
@@ -122,10 +130,11 @@ export function useCartQty(id: string): number {
   );
 }
 
-/** Содержимое корзины и итоги. */
+/** Содержимое корзины (со свежими ценами и наличием из таблицы) и итоги. */
 export function useCart() {
-  const { store } = useCartContext();
-  const items = useItems(store);
+  const { store, live } = useCartContext();
+  const saved = useItems(store);
+  const items = useMemo(() => refreshCart(saved, live), [saved, live]);
   const totals = useMemo(() => cartTotals(items), [items]);
   return { items, totals };
 }

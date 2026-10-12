@@ -8,7 +8,38 @@ export interface CartItem {
   title: string;
   price: number | null;
   qty: number;
+  /** Позиции больше нет в таблице или она закончилась (не сохраняется, считается заново). */
+  unavailable?: boolean;
 }
+
+/** Актуальные данные товара из таблицы — по ним обновляется корзина. */
+export interface LiveProduct {
+  title: string;
+  price: number | null;
+  inStock: boolean;
+}
+
+/**
+ * Сверяет корзину с текущей таблицей: подставляет свежие цену и название,
+ * а закончившиеся или удалённые позиции помечает как недоступные.
+ */
+export function refreshCart(items: CartItem[], live: Map<string, LiveProduct> | undefined): CartItem[] {
+  if (!live || live.size === 0) return items;
+  let changed = false;
+  const next = items.map((item) => {
+    const product = live.get(item.id);
+    const unavailable = !product || !product.inStock;
+    const title = product?.title ?? item.title;
+    const price = product ? product.price : item.price;
+    if (unavailable === !!item.unavailable && title === item.title && price === item.price) return item;
+    changed = true;
+    return { ...item, title, price, unavailable };
+  });
+  return changed ? next : items;
+}
+
+/** Позиции, которые можно заказать. */
+export const availableItems = (items: CartItem[]) => items.filter((item) => !item.unavailable);
 
 export const MAX_QTY = 99;
 
@@ -17,7 +48,7 @@ export function cartItemFromProduct(product: Product, qty = 1): CartItem {
 }
 
 /** Меняет количество позиции; 0 и меньше — удаляет её из корзины. */
-export function setQty(items: CartItem[], item: Omit<CartItem, "qty">, qty: number): CartItem[] {
+export function setQty(items: CartItem[], { unavailable: _, ...item }: Omit<CartItem, "qty">, qty: number): CartItem[] {
   const next = Math.min(Math.max(Math.trunc(qty), 0), MAX_QTY);
   const exists = items.some((i) => i.id === item.id);
   if (next === 0) return items.filter((i) => i.id !== item.id);
@@ -39,6 +70,7 @@ export function cartTotals(items: CartItem[]): CartTotals {
   let sum = 0;
   let hasUnpriced = false;
   for (const item of items) {
+    if (item.unavailable) continue;
     count += item.qty;
     if (item.price === null) hasUnpriced = true;
     else sum += item.price * item.qty;
@@ -94,7 +126,7 @@ export function isValidPhone(phone: string): boolean {
 
 export function validateCheckout(items: CartItem[], form: CheckoutForm): CheckoutErrors {
   const errors: CheckoutErrors = {};
-  if (items.length === 0) errors.cart = "Корзина пуста — добавьте товары.";
+  if (availableItems(items).length === 0) errors.cart = "Корзина пуста — добавьте товары.";
   if (form.method === "metro" && !form.station) errors.station = "Выберите станцию метро.";
   if (form.method === "pickup" && !form.pickupPoint) errors.pickupPoint = "Выберите точку самовывоза.";
   if (form.method === "delivery") {
@@ -118,7 +150,7 @@ export function describeDelivery(form: CheckoutForm): string {
 
 /** Текст заказа для менеджера в Telegram. `store` — точка, откуда заказ. */
 export function buildOrderMessage(items: CartItem[], form: CheckoutForm, store?: string): string {
-  const lines = items.map((item, i) => {
+  const lines = availableItems(items).map((item, i) => {
     const total = lineTotal(item);
     const price = total === null ? "цена по запросу" : formatPrice(total);
     return `${i + 1}. ${item.title} x${item.qty} (${price})`;
@@ -127,7 +159,7 @@ export function buildOrderMessage(items: CartItem[], form: CheckoutForm, store?:
   const total = `Итого: ${formatPrice(sum)}${hasUnpriced ? " + позиции с ценой по запросу" : ""}`;
   return [
     "Новый заказ!",
-    ...(store ? [`Точка: ${store}`] : []),
+    ...(store ? [`Прайс: ${store}`] : []),
     ...lines,
     total,
     `Способ получения: ${describeDelivery(form)}`,
