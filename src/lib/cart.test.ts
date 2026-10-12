@@ -5,6 +5,7 @@ import {
   emptyCheckoutForm,
   isValidPhone,
   refreshCart,
+  repeatOrder,
   sanitizeCart,
   setQty,
   validateCheckout,
@@ -137,5 +138,20 @@ describe("refreshCart", () => {
     const saved: CartItem[] = [{ id: "a", title: "A", price: 10, qty: 1 }];
     expect(refreshCart(saved, new Map([["a", { title: "A", price: 10, inStock: true }]]))).toBe(saved);
     expect(refreshCart(saved, undefined)).toBe(saved);
+  });
+});
+
+describe("repeatOrder", () => {
+  it("adds only what is in stock, with fresh prices", () => {
+    const last: CartItem[] = [
+      { id: "a", title: "A", price: 10, qty: 2 },
+      { id: "b", title: "B", price: 5, qty: 1 },
+      { id: "c", title: "C", price: 5, qty: 1 },
+    ];
+    const live = new Map([
+      ["a", { title: "A", price: 11, inStock: true }],
+      ["b", { title: "B", price: 5, inStock: false }],
+    ]);
+    expect(repeatOrder(last, live)).toEqual({ items: [{ id: "a", title: "A", price: 11, qty: 2 }], missing: 2 });
   });
 });

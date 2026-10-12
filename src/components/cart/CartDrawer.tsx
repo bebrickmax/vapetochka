@@ -5,8 +5,10 @@ import { metroLines, pickupPoints } from "@/config/checkout";
 import { siteConfig } from "@/config/site";
 import type { StoreInfo } from "@/config/stores";
 import {
+  availableItems,
   buildOrderMessage,
   emptyCheckoutForm,
+  repeatOrder,
   lineTotal,
   validateCheckout,
   type CartItem,
@@ -16,9 +18,9 @@ import {
 } from "@/lib/cart";
 import { formatPrice, pluralize } from "@/lib/format";
 import { telegramLink } from "@/lib/telegram";
-import { ArrowLeftIcon, CartIcon, CheckIcon, CloseIcon, TelegramIcon, TrashIcon } from "../icons";
-import { copyText, openTelegram } from "../TelegramAnchor";
-import { useCart, useCartActions, useCartDrawer } from "./CartProvider";
+import { ArrowLeftIcon, CartIcon, CheckIcon, CloseIcon, RepeatIcon, TelegramIcon, TrashIcon } from "../icons";
+import { copyText, openTelegram, showToast } from "../TelegramAnchor";
+import { useCart, useCartActions, useCartDrawer, useLastOrder } from "./CartProvider";
 import { ManagerHours } from "./ManagerHours";
 import { QtyStepper } from "./QtyStepper";
 
@@ -49,6 +51,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
       : rawForm;
   const { items, totals } = useCart();
   const { clear } = useCartActions();
+  const lastOrder = useLastOrder();
   const [view, setView] = useState<View>("cart");
   const [submitted, setSubmitted] = useState(false);
   const [sentText, setSentText] = useState("");
@@ -88,6 +91,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
       return;
     }
     const text = buildOrderMessage(items, form, store.title);
+    lastOrder.save(availableItems(items));
     setSentText(text);
     void copy(text); // запасной вариант: если Telegram не подставит текст — его можно вставить
     go("sent");
@@ -173,15 +177,47 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
 }
 
 function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void }) {
-  const { setQty, remove } = useCartActions();
+  const { setQty, remove, replace } = useCartActions();
+  const lastOrder = useLastOrder();
   const unavailable = items.filter((item) => item.unavailable);
+  const [last, setLast] = useState<CartItem[]>([]);
+
+  // Прошлый заказ читаем после открытия корзины (хранится только в браузере).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage доступен только в браузере
+    setLast(lastOrder.load());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- читаем один раз при открытии
+  }, []);
+
+  const repeat = () => {
+    const { items: next, missing } = repeatOrder(last, lastOrder.live);
+    if (next.length > 0) replace(next);
+    showToast(
+      next.length === 0
+        ? "Позиций из прошлого заказа сейчас нет в наличии"
+        : missing > 0
+          ? `Добавлено ${next.length}, ещё ${missing} ${pluralize(missing, ["позиция закончилась", "позиции закончились", "позиций закончились"])}`
+          : "Прошлый заказ снова в корзине",
+    );
+  };
 
   if (items.length === 0) {
+    const lastCount = last.reduce((sum, item) => sum + item.qty, 0);
     return (
       <div className="flex flex-col items-center gap-3 py-12 text-center">
         <CartIcon width={44} height={44} className="text-muted" />
         <p className="text-lg font-bold">Корзина пуста</p>
-        <p className="max-w-64 text-sm text-muted">Добавьте товары кнопкой «В корзину» на карточках каталога.</p>
+        <p className="max-w-64 text-sm text-muted">Добавьте товары кнопкой «+» на карточках каталога.</p>
+        {lastCount > 0 && (
+          <button
+            type="button"
+            onClick={repeat}
+            className="btn-paper mt-2 flex h-11 items-center gap-2 rounded-full px-5 text-sm font-bold transition active:scale-[0.97]"
+          >
+            <RepeatIcon width={18} height={18} />
+            Повторить прошлый заказ ({lastCount} шт.)
+          </button>
+        )}
         <button
           type="button"
           onClick={onBrowse}

@@ -8,7 +8,12 @@ import "./globals.css";
 const wide = Unbounded({ subsets: ["latin", "cyrillic"], variable: "--font-wide", display: "swap" });
 const body = Manrope({ subsets: ["latin", "cyrillic"], variable: "--font-body", display: "swap" });
 
+const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : "https://vapetochka.vercel.app";
+
 export const metadata: Metadata = {
+  metadataBase: new URL(siteUrl),
   title: `${siteConfig.displayName} — каталог`,
   description: siteConfig.description,
   applicationName: siteConfig.displayName,

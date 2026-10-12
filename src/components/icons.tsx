@@ -255,8 +255,17 @@ function GridGlyph(props: IconProps) {
   );
 }
 
+function HeartGlyph(props: IconProps) {
+  return (
+    <svg {...glyph} {...props}>
+      <path d="M12 20s-7.5-4.4-7.5-10.1A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.6C19.5 15.6 12 20 12 20Z" />
+    </svg>
+  );
+}
+
 const CATEGORY_GLYPHS: Record<string, (props: IconProps) => JSX.Element> = {
   all: GridGlyph,
+  fav: HeartGlyph,
   promo: GiftGlyph,
   liquids: DropGlyph,
   freebase: DropGlyph,
@@ -275,4 +284,23 @@ const CATEGORY_GLYPHS: Record<string, (props: IconProps) => JSX.Element> = {
 export function CategoryIcon({ id, ...props }: IconProps & { id: string }) {
   const Glyph = CATEGORY_GLYPHS[id.replace(/-\d+$/, "")] ?? TagGlyph;
   return <Glyph {...props} />;
+}
+
+export function HeartIcon({ filled = false, ...props }: IconProps & { filled?: boolean }) {
+  return (
+    <svg {...base} fill={filled ? "currentColor" : "none"} {...props}>
+      <path d="M12 20s-7.5-4.4-7.5-10.1A4.3 4.3 0 0 1 12 7.3a4.3 4.3 0 0 1 7.5 2.6C19.5 15.6 12 20 12 20Z" />
+    </svg>
+  );
+}
+
+export function RepeatIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M17 2.5 20.5 6 17 9.5" />
+      <path d="M3.5 11.5V10A4 4 0 0 1 7.5 6h13" />
+      <path d="M7 21.5 3.5 18 7 14.5" />
+      <path d="M20.5 12.5V14a4 4 0 0 1-4 4h-13" />
+    </svg>
+  );
 }
