@@ -3,6 +3,7 @@ import { cacheConfig, sheetsConfig } from "@/config/site";
 import { getStore, type Store } from "@/config/stores";
 import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
 import { assignFamilies } from "@/lib/brands";
+import { proxyImages } from "@/lib/photos";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
 import { fetchStoreSheets, type StoreSheets } from "@/lib/sheets/sources";
@@ -18,7 +19,7 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId 
   for (const sheet of sheets) {
     const category = categoryFromSheet(sheet.title);
     if (usedIds.has(category.id)) category.id = `${category.id}-${usedIds.size}`;
-    const parsed = parseSheet(sheet.rows, category.id, sheet.images);
+    const parsed = parseSheet(sheet.rows, category.id, proxyImages(storeId, sheet.gid, sheet.images));
     if (parsed.length === 0) continue; // пустые листы не показываем
     usedIds.add(category.id);
     categories.push(category);
@@ -33,8 +34,8 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId 
 }
 
 /** Лист «ОПТ» → оптовые цены по ступеням; если он не похож на прайс — просто строки текста. */
-export function buildWholesale(sheet: RawSheet): Wholesale | undefined {
-  return parseWholesaleSheet(sheet.rows, sheet.images);
+export function buildWholesale(sheet: RawSheet, storeId = "main"): Wholesale | undefined {
+  return parseWholesaleSheet(sheet.rows, proxyImages(storeId, sheet.gid, sheet.images));
 }
 
 async function loadSheets(store: Store): Promise<StoreSheets & { source: CatalogSource }> {
@@ -71,6 +72,6 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
 
   const { sheets, wholesale: wholesaleSheet, source } = await loadSheets(store);
   const catalog = buildCatalog(sheets, source, store.id);
-  const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet) : undefined;
+  const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet, store.id) : undefined;
   return wholesale ? { ...catalog, wholesale } : catalog;
 }

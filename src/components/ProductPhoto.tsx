@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
-import { sizedImage } from "@/lib/sheets/htmlview";
+import { sizedPhoto } from "@/lib/photos";
 import { CloseIcon } from "./icons";
 import { LogoMark } from "./Logo";
 
@@ -54,9 +54,8 @@ export function PhotoViewerProvider({ children }: { children: ReactNode }) {
             <div className="animate-pop-in flex max-h-full max-w-lg flex-col overflow-hidden rounded-[28px] bg-paper">
               {/* eslint-disable-next-line @next/next/no-img-element -- фото берутся из Google Таблицы как есть */}
               <img
-                src={sizedImage(photo.src, 1200)}
+                src={sizedPhoto(photo.src, 1200)}
                 alt={photo.alt}
-                referrerPolicy="no-referrer"
                 className="max-h-[72dvh] w-full object-contain p-4"
               />
               <p className="border-t border-black/10 px-5 py-3 text-center text-sm font-semibold text-on-paper">
@@ -104,11 +103,10 @@ export function ProductPhoto({ src, alt, className = "", size = 360 }: ProductPh
     >
       {/* eslint-disable-next-line @next/next/no-img-element -- фото берутся из Google Таблицы как есть */}
       <img
-        src={sizedImage(src, size)}
+        src={sizedPhoto(src, size)}
         alt=""
         loading="lazy"
         decoding="async"
-        referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
         className="size-full object-contain p-1.5 transition-transform duration-300 group-active:scale-95"
       />

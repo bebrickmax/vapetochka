@@ -178,14 +178,15 @@ describe("buildWholesale", () => {
       ["Iceberg"],
       ["", "Iceberg Strong 75mg", "11", "10,5", "10", "9,5"],
     ];
-    const w = buildWholesale({ title: "ОПТ", rows, images: { 5: "https://img/duall" } })!;
+    const img = "https://docs.google.com/sheets-images-rt/AO43MLduallDuallDuallDuall";
+    const w = buildWholesale({ title: "ОПТ", rows, gid: "1363263078", images: { 5: img } }, "main")!;
     expect(w.tiers).toEqual(["от 10 шт", "от 30 шт", "от 50 шт", "от 100 шт"]);
     expect(w.sections.map((s) => s.title)).toEqual(["Жидкости", "Снюс"]);
     expect(w.sections[0].brands.map((b) => b.title)).toEqual(["Duall", "Candy Lab"]);
     expect(w.sections[0].brands[0].items[0]).toEqual({
       name: "Duall 20mg",
       prices: [11, 10.5, 10, 9.5],
-      image: "https://img/duall",
+      image: "/api/photo?store=main&gid=1363263078&row=5&t=AO43MLduallDuallDuallDuall",
     });
     expect(w.sections[1].brands[0].items[0].prices).toEqual([11, 10.5, 10, 9.5]);
   });
