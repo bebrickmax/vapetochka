@@ -21,6 +21,14 @@ interface LineCardProps {
   category?: Category;
   /** Развернуть все позиции сразу (например, при поиске). */
   expanded?: boolean;
+  /** Бренд уже написан в заголовке раздела — над названием его не повторяем. */
+  hideFamily?: boolean;
+}
+
+/** Название линейки начинается с бренда: «Drymost 5mg» и Drymost. */
+export function startsWithFamily(title: string, family: string): boolean {
+  const norm = (t: string) => t.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
+  return norm(title).startsWith(norm(family));
 }
 
 /** Самая частая цена — её показываем в шапке, а у позиций — только отличающуюся. */
@@ -33,7 +41,7 @@ function headlinePrice(items: ProductItem[]): number | null {
   return best;
 }
 
-function LineCardBase({ group, visible, category, expanded = false }: LineCardProps) {
+function LineCardBase({ group, visible, category, expanded = false, hideFamily = false }: LineCardProps) {
   const [open, setOpen] = useState(expanded);
   const title = group.line ? displayLine(group.line, group.strength) : group.family ?? "";
   const items = group.items;
@@ -48,7 +56,7 @@ function LineCardBase({ group, visible, category, expanded = false }: LineCardPr
   const itemPhotos = new Set(items.map((i) => i.image).filter(Boolean)).size > 1;
   // Бренд над названием — если название само с него не начинается («Tasty Lab» над «Рик и Морти»).
   const family = group.family;
-  const above = family && !title.toLowerCase().startsWith(family.toLowerCase()) ? family : undefined;
+  const above = !hideFamily && family && !startsWithFamily(title, family) ? family : undefined;
 
   const collapsible = !open && visible.length > COLLAPSED_ROWS + 2;
   const shown = collapsible ? visible.slice(0, COLLAPSED_ROWS) : visible;
@@ -163,15 +171,19 @@ function ItemRow({ group, itemIndex, showPrice, continuation, photo, photoSlot }
           <p className="text-[14px] font-semibold text-ink/85">{item.variant}</p>
         ) : (
           <>
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold leading-snug text-ink">
+            <p className="text-[15px] font-semibold leading-snug text-ink [overflow-wrap:anywhere]">
               {item.emoji && (
-                <span aria-hidden className="text-[13px]">
+                <span aria-hidden className="mr-1.5 text-[13px]">
                   {item.emoji}
                 </span>
               )}
-              <span className="[overflow-wrap:anywhere]">{item.name}</span>
-              {item.variant && <Chip>{item.variant}</Chip>}
+              {item.name}
             </p>
+            {item.variant && (
+              <div className="mt-1">
+                <Chip>{item.variant}</Chip>
+              </div>
+            )}
             {item.description && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.description}</p>}
           </>
         )}

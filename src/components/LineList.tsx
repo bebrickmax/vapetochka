@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { pluralize } from "@/lib/format";
 import type { Category, ProductGroup } from "@/lib/types";
 import { CategoryIcon } from "./icons";
-import { LineCard } from "./LineCard";
+import { displayLine } from "@/lib/products";
+import { LineCard, startsWithFamily } from "./LineCard";
 
 /** Сколько линеек дорисовывается за раз. */
 const PAGE_SIZE = 12;
@@ -62,9 +63,16 @@ export function LineList({ sections, categories, expanded }: LineListProps) {
         const entries = section.entries.slice(0, budget);
         budget -= entries.length;
         const lines = section.entries.length;
+        // «Skala» над единственной карточкой «Skala» — лишний повтор: заголовок раздела прячем.
+        const showTitle =
+          !!section.title &&
+          (!!section.categoryId ||
+            section.entries.some(
+              ({ group }) => !startsWithFamily(displayLine(group.line, group.strength), section.title!),
+            ));
         return (
           <section key={section.key} aria-label={section.title}>
-            {section.title && (
+            {showTitle && (
               <div className="mb-3 flex items-baseline justify-between gap-3 px-1">
                 <h2 className="font-wide flex min-w-0 items-center gap-2 text-[19px] font-semibold leading-tight">
                   {section.categoryId && (
@@ -85,6 +93,7 @@ export function LineList({ sections, categories, expanded }: LineListProps) {
                   visible={visible}
                   category={categories?.get(group.categoryId)}
                   expanded={expanded}
+                  hideFamily={showTitle && !section.categoryId}
                 />
               ))}
             </div>

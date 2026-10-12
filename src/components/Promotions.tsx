@@ -89,7 +89,7 @@ function WholesaleView({ wholesale }: { wholesale?: Wholesale }) {
       <div className="flex flex-col gap-4 rounded-[24px] border border-line-strong p-4 sm:flex-row sm:items-center">
         <p className="flex-1 text-[15px] leading-relaxed text-ink/85">
           {sections.length > 0
-            ? "Цена за штуку зависит от общего количества. Напишите менеджеру — подтвердим наличие и посчитаем заказ."
+            ? "Цена за штуку в BYN зависит от общего количества. Напишите менеджеру — подтвердим наличие и посчитаем заказ."
             : "Оптовые цены уточняйте у менеджера — подберём позиции и посчитаем стоимость."}
         </p>
         <TelegramAnchor
