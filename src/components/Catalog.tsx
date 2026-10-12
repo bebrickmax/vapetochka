@@ -5,7 +5,7 @@ import { siteConfig } from "@/config/site";
 import type { StoreInfo } from "@/config/stores";
 import { formatUpdatedAt, pluralize } from "@/lib/format";
 import { usePersistentState, useScrolledPast } from "@/lib/hooks";
-import { toProduct } from "@/lib/products";
+import { productTitle, toProduct } from "@/lib/products";
 import { buildHaystack, matches, parseQuery } from "@/lib/search";
 import { telegramLink } from "@/lib/telegram";
 import type { Catalog as CatalogData, ProductGroup } from "@/lib/types";
@@ -64,6 +64,20 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
         })),
       ),
     [groups, categoryMap],
+  );
+
+  // Актуальные цены и наличие для корзины.
+  const liveProducts = useMemo(
+    () =>
+      new Map(
+        groups.flatMap((group) =>
+          group.items.map((item, i) => {
+            const product = toProduct(group, i);
+            return [product.id, { title: productTitle(product), price: item.price, inStock: item.status !== "out" }] as const;
+          }),
+        ),
+      ),
+    [groups],
   );
 
   const [category, setCategory] = useState(categories[0]?.id ?? ALL);
@@ -210,7 +224,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
   const scrolled = useScrolledPast(900);
 
   return (
-    <CartProvider storeId={store.id}>
+    <CartProvider storeId={store.id} live={liveProducts}>
       <PhotoViewerProvider>
         <div className="mx-auto flex min-h-dvh w-full max-w-6xl flex-col">
           {/* Шапка с логотипом — уезжает при прокрутке */}

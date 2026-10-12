@@ -4,6 +4,7 @@ import { getStore, type Store } from "@/config/stores";
 import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
 import { assignFamilies } from "@/lib/brands";
 import { proxyImages } from "@/lib/photos";
+import { uniqueKeys } from "@/lib/products";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
 import { fetchStoreSheets, type StoreSheets } from "@/lib/sheets/sources";
@@ -25,8 +26,10 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId 
     categories.push(category);
 
     const families = assignFamilies(parsed);
+    // id линейки — по её названию, а не по номеру: правки таблицы выше не сдвигают корзину.
+    const keys = uniqueKeys(parsed.map((g) => `${g.section ?? ""}|${g.brand ?? ""}|${g.line}`));
     parsed.forEach((group, index) => {
-      groups.push({ ...group, id: `${category.id}-${index}`, family: families[index] });
+      groups.push({ ...group, id: `${category.id}-${keys[index]}`, family: families[index] });
     });
   }
 

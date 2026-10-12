@@ -32,9 +32,9 @@ export function StorePicker({ stores }: { stores: StoreInfo[] }) {
       <Logo className="animate-rise h-auto w-56 text-ink" />
 
       <div className={`mt-auto pt-16 transition-opacity duration-300 ${checking ? "opacity-0" : "opacity-100"}`}>
-        <h1 className="font-wide text-[26px] font-semibold leading-tight">Выберите точку</h1>
+        <h1 className="font-wide text-[26px] font-semibold leading-tight">Выберите прайс</h1>
         <p className="mt-2 text-[15px] leading-relaxed text-muted">
-          В каждой точке своё наличие. Каталог покажет то, что есть именно там.
+          Наличие в них разное. Каталог покажет то, что есть в выбранном прайсе.
         </p>
 
         <ul className="mt-6 space-y-3">
@@ -58,7 +58,7 @@ export function StorePicker({ stores }: { stores: StoreInfo[] }) {
         </ul>
 
         <p className="mt-6 text-xs leading-relaxed text-muted">
-          Выбор запомнится на этом устройстве. Сменить точку можно в шапке каталога. Продажа только лицам старше 18 лет.
+          Выбор запомнится на этом устройстве. Сменить прайс можно в шапке каталога. Продажа только лицам старше 18 лет.
         </p>
       </div>
     </main>

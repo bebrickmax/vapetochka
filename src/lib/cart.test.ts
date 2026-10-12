@@ -4,6 +4,7 @@ import {
   cartTotals,
   emptyCheckoutForm,
   isValidPhone,
+  refreshCart,
   sanitizeCart,
   setQty,
   validateCheckout,
@@ -91,7 +92,7 @@ describe("checkout", () => {
       { ...emptyCheckoutForm, method: "pickup", pickupPoint: "м. Каменная Горка" },
       "Каменная Горка",
     );
-    expect(pickup.split("\n").slice(0, 2)).toEqual(["Новый заказ!", "Точка: Каменная Горка"]);
+    expect(pickup.split("\n").slice(0, 2)).toEqual(["Новый заказ!", "Прайс: Каменная Горка"]);
     expect(pickup).toContain("Способ получения: Самовывоз (м. Каменная Горка)");
     expect(delivery).toContain("Итого: 0 BYN + позиции с ценой по запросу");
     expect(delivery).toContain("Способ получения: Доставка (ул. Ленина 1, +375 29 000-00-00)");
@@ -105,5 +106,36 @@ describe("manager hours", () => {
     expect(isManagerOnline(new Date("2026-10-09T08:30:00Z"))).toBe(true);
     expect(isManagerOnline(new Date("2026-10-09T18:14:00Z"))).toBe(true);
     expect(isManagerOnline(new Date("2026-10-09T18:15:00Z"))).toBe(false);
+  });
+});
+
+describe("refreshCart", () => {
+  it("takes fresh prices and marks sold-out or removed items", () => {
+    const saved: CartItem[] = [
+      { id: "a", title: "Старое название", price: 10, qty: 2 },
+      { id: "b", title: "Elfbar", price: 29, qty: 1 },
+      { id: "gone", title: "Удалённая", price: 5, qty: 1 },
+    ];
+    const live = new Map([
+      ["a", { title: "Новое название", price: 12, inStock: true }],
+      ["b", { title: "Elfbar", price: 29, inStock: false }],
+    ]);
+    const items = refreshCart(saved, live);
+    expect(items.map((i) => [i.id, i.title, i.price, !!i.unavailable])).toEqual([
+      ["a", "Новое название", 12, false],
+      ["b", "Elfbar", 29, true],
+      ["gone", "Удалённая", 5, true],
+    ]);
+    expect(cartTotals(items)).toEqual({ count: 2, sum: 24, hasUnpriced: false });
+    const text = buildOrderMessage(items, { ...emptyCheckoutForm, station: "Немига" });
+    expect(text).toContain("1. Новое название x2 (24 BYN)");
+    expect(text).not.toContain("Elfbar");
+    expect(validateCheckout(items.slice(1), { ...emptyCheckoutForm, station: "Немига" }).cart).toBeDefined();
+  });
+
+  it("keeps the same array when nothing changed", () => {
+    const saved: CartItem[] = [{ id: "a", title: "A", price: 10, qty: 1 }];
+    expect(refreshCart(saved, new Map([["a", { title: "A", price: 10, inStock: true }]]))).toBe(saved);
+    expect(refreshCart(saved, undefined)).toBe(saved);
   });
 });

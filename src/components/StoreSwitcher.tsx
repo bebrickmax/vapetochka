@@ -40,11 +40,11 @@ export function StoreSwitcher({ store }: { store: StoreInfo }) {
           <div
             role="dialog"
             aria-modal="true"
-            aria-label="Выбор точки"
+            aria-label="Выбор прайса"
             className="animate-sheet-in relative w-full max-w-md rounded-t-[28px] border border-line bg-raised p-4 pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:rounded-[28px]"
           >
             <div className="mb-4 flex items-center justify-between gap-3 pl-1">
-              <h2 className="font-wide text-lg font-semibold">Выберите точку</h2>
+              <h2 className="font-wide text-lg font-semibold">Выберите прайс</h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -80,7 +80,7 @@ export function StoreSwitcher({ store }: { store: StoreInfo }) {
                 );
               })}
             </ul>
-            <p className="mt-3 px-1 text-xs text-muted">Корзина у каждой точки своя: наличие в них разное.</p>
+            <p className="mt-3 px-1 text-xs text-muted">Корзина у каждого прайса своя: наличие в них разное.</p>
           </div>
         </div>
       )}
