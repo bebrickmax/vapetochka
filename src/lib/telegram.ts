@@ -8,14 +8,34 @@ export interface TelegramLink {
   app: string;
   /** Запасная веб-ссылка, если приложение не установлено. */
   web: string;
+  /** Чат без готового текста — для компьютеров (см. withoutText). */
+  plain: { app: string; web: string };
+  /** Готовый текст сообщения, если он есть. */
+  text?: string;
 }
 
 export function telegramLink(text?: string, username: string = siteConfig.telegramManager): TelegramLink {
-  const query = text ? `&text=${encodeURIComponent(text)}` : "";
+  const plain = { app: `tg://resolve?domain=${username}`, web: `https://t.me/${username}` };
+  if (!text) return { ...plain, plain };
+  const encoded = encodeURIComponent(text);
   return {
-    app: `tg://resolve?domain=${username}${query}`,
-    web: `https://t.me/${username}${text ? `?text=${encodeURIComponent(text)}` : ""}`,
+    app: `${plain.app}&text=${encoded}`,
+    web: `${plain.web}?text=${encoded}`,
+    plain,
+    text,
   };
+}
+
+/**
+ * Компьютерные приложения Telegram (macOS и др.) не раскодируют русский текст
+ * из ссылки и показывают «%D0%9D%D0%BE…». На компьютере открываем чат без текста,
+ * а текст копируем в буфер обмена — его остаётся вставить.
+ */
+export function isDesktopDevice(userAgent: string, maxTouchPoints: number): boolean {
+  if (/Android|iPhone|iPad|iPod|Mobile|Windows Phone/i.test(userAgent)) return false;
+  // iPad с iPadOS представляется как Mac, но у него есть сенсорный экран.
+  if (/Macintosh/i.test(userAgent) && maxTouchPoints > 1) return false;
+  return true;
 }
 
 export function orderMessage(product: Product): string {

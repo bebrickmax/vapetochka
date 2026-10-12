@@ -3,14 +3,14 @@ import { siteConfig } from "@/config/site";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: `${siteConfig.name} — каталог`,
-    short_name: siteConfig.name,
+    name: `${siteConfig.displayName} — каталог`,
+    short_name: siteConfig.displayName,
     description: siteConfig.description,
     start_url: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#07070c",
-    theme_color: "#07070c",
+    background_color: "#000000",
+    theme_color: "#000000",
     lang: "ru",
     icons: [
       { src: "/icon.svg", sizes: "any", type: "image/svg+xml" },

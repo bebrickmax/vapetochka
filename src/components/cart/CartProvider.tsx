@@ -1,9 +1,10 @@
 "use client";
 
 import { createContext, useContext, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { DEFAULT_STORE_ID } from "@/config/stores";
 import { cartTotals, sanitizeCart, setQty, type CartItem } from "@/lib/cart";
 
-const STORAGE_KEY = "vt:cart";
+const LEGACY_KEY = "vt:cart";
 const EMPTY: CartItem[] = [];
 
 /**
@@ -11,14 +12,19 @@ const EMPTY: CartItem[] = [];
  * вкладок), сохраняется в localStorage и синхронизируется между вкладками браузера.
  * Карточки подписываются только на своё количество — лишних перерисовок нет.
  */
-function createCartStore() {
+function createCartStore(storeId: string) {
+  // У каждой точки своя корзина: наличие и позиции в них разные.
+  const STORAGE_KEY = `vt:cart:${storeId}`;
   let items: CartItem[] = EMPTY;
   let loaded = false;
   const listeners = new Set<() => void>();
 
   const read = () => {
     try {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
+      // Корзина, собранная до появления точек, достаётся основной точке.
+      const stored =
+        window.localStorage.getItem(STORAGE_KEY) ??
+        (storeId === DEFAULT_STORE_ID ? window.localStorage.getItem(LEGACY_KEY) : null);
       items = stored ? sanitizeCart(JSON.parse(stored)) : EMPTY;
     } catch {
       items = EMPTY; // приватный режим или повреждённое значение
@@ -76,8 +82,8 @@ interface CartUi {
 
 const CartContext = createContext<CartUi | null>(null);
 
-export function CartProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(createCartStore);
+export function CartProvider({ storeId, children }: { storeId: string; children: ReactNode }) {
+  const [store] = useState(() => createCartStore(storeId));
   const [open, setOpen] = useState(false);
   const value = useMemo(() => ({ store, open, setOpen }), [store, open]);
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

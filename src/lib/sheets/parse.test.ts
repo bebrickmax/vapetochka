@@ -79,7 +79,9 @@ describe("parseSheet", () => {
       ["Santi / Charon baby+", "0.6 Ом", 10, "in"],
     ]);
     const cartridges = groups[2];
-    expect(cartridges).toMatchObject({ brand: "Картриджи", line: "Vaporesso" });
+    // «Картриджи» — подраздел листа, а не бренд.
+    expect(cartridges).toMatchObject({ section: "Картриджи", line: "Vaporesso" });
+    expect(cartridges.brand).toBeUndefined();
     expect(cartridges.items.at(-1)).toMatchObject({ name: "Luxe XR", price: 15, status: "in" });
     expect(cartridges.items.at(-1)?.variant).toBeUndefined();
   });
@@ -158,15 +160,101 @@ describe("parseCsv", () => {
 });
 
 describe("buildWholesale", () => {
-  it("parses a price-list sheet into groups", () => {
-    const w = buildWholesale({ title: "ОПТ", rows: [["Skala — от 10 шт."], ["8 BYN"], ["", "Любые вкусы", "✅"]] });
-    expect(w?.groups).toHaveLength(1);
-    expect(w?.groups[0].items[0]).toMatchObject({ name: "Любые вкусы", price: 8, status: "in" });
+  it("parses tiers, sections, brands and photos", () => {
+    const rows = [
+      ["", "", "10 шт", "30 шт", "50 шт", "100 шт"],
+      [],
+      ["Жидкости"],
+      [],
+      ["Duall"],
+      ["", "Duall 20mg", "11", "10,5", "10", "9,5"],
+      ["", "Duall Extreme 50mg", "12", "11,5", "11", "10,5"],
+      [],
+      ["Candy Lab"],
+      ["", "Slurm 20mg", "11", "10,75", "10,5", "10"],
+      [],
+      ["Снюс"],
+      [],
+      ["Iceberg"],
+      ["", "Iceberg Strong 75mg", "11", "10,5", "10", "9,5"],
+    ];
+    const img = "https://docs.google.com/sheets-images-rt/AO43MLduallDuallDuallDuall";
+    const w = buildWholesale({ title: "ОПТ", rows, gid: "1363263078", images: { 5: img } }, "main")!;
+    expect(w.tiers).toEqual(["от 10 шт", "от 30 шт", "от 50 шт", "от 100 шт"]);
+    expect(w.sections.map((s) => s.title)).toEqual(["Жидкости", "Снюс"]);
+    expect(w.sections[0].brands.map((b) => b.title)).toEqual(["Duall", "Candy Lab"]);
+    expect(w.sections[0].brands[0].items[0]).toEqual({
+      name: "Duall 20mg",
+      prices: [11, 10.5, 10, 9.5],
+      image: "/api/photo?store=main&gid=1363263078&row=5&t=AO43MLduallDuallDuallDuall",
+    });
+    expect(w.sections[1].brands[0].items[0].prices).toEqual([11, 10.5, 10, 9.5]);
+  });
+
+  it("keeps items without prices and skips empty brands", () => {
+    const rows = [
+      ["Устройства"],
+      [],
+      ["Vaporesso "],
+      ["GeekVape"],
+      ["", "Aegis H45"],
+      ["", "Aegis Boost 3", "", "", ""],
+    ];
+    const w = buildWholesale({ title: "ОПТ", rows })!;
+    expect(w.sections).toEqual([
+      {
+        title: "Устройства",
+        brands: [
+          {
+            title: "GeekVape",
+            items: [
+              { name: "Aegis H45", prices: [] },
+              { name: "Aegis Boost 3", prices: [] },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("uses default tier labels when the sheet has no header row", () => {
+    const w = buildWholesale({ title: "ОПТ", rows: [["Duall"], ["", "Duall 20mg", "11", "10,5"]] })!;
+    expect(w.tiers).toEqual(["от 10 шт", "от 30 шт"]);
+    expect(w.sections[0]).toMatchObject({ title: "", brands: [{ title: "Duall" }] });
   });
 
   it("falls back to plain text lines and skips empty sheets", () => {
     const w = buildWholesale({ title: "ОПТ", rows: [["Опт от 100 BYN"], [], ["Скидка 10% от 300 BYN"]] });
-    expect(w).toEqual({ groups: [], lines: ["Опт от 100 BYN", "Скидка 10% от 300 BYN"] });
+    expect(w).toEqual({ tiers: [], sections: [], lines: ["Опт от 100 BYN", "Скидка 10% от 300 BYN"] });
     expect(buildWholesale({ title: "ОПТ", rows: [[], []] })).toBeUndefined();
+  });
+});
+
+describe("photos", () => {
+  it("gives a line the photo from its first item row", () => {
+    const rows = [["Podonki Blood 50mg"], ["13 BYN"], ["", "Клубника банан", "✅"], ["", "Вишня", "✅"]];
+    const [group] = parseSheet(rows, "liquids", { 2: "https://img/blood" });
+    expect(group.image).toBe("https://img/blood");
+    expect(group.items[0].image).toBe("https://img/blood");
+    expect(group.items[1].image).toBeUndefined();
+  });
+
+  it("keeps per-model photos and passes them to variant rows", () => {
+    const rows = [
+      ["Smoant"],
+      [],
+      ["10 BYN"],
+      ["", "Charon baby", "0.6 Ом", "✅"],
+      ["", "Santi", "0.3 Ом", "✅"],
+      ["", "", "0.4 Ом", "✅"],
+    ];
+    const [group] = parseSheet(rows, "consumables", { 3: "https://img/charon", 4: "https://img/santi" });
+    expect(group.image).toBe("https://img/charon");
+    expect(group.items.map((i) => i.image)).toEqual(["https://img/charon", "https://img/santi", "https://img/santi"]);
+  });
+
+  it("takes a photo placed on the header row", () => {
+    const [group] = parseSheet([["Hqd 20mg"], ["15 BYN"], ["", "Банан", "✅"]], "liquids", { 0: "https://img/hqd" });
+    expect(group.image).toBe("https://img/hqd");
   });
 });

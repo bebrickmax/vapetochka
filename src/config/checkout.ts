@@ -23,8 +23,8 @@ export const metroLines = [
   },
 ] as const;
 
-/** Точки самовывоза. */
-export const pickupPoints = ["Якуба Коласа", "Академия Наук"] as const;
+/** Точки самовывоза основного склада. */
+export const pickupPoints = ["Якуба Коласа", "Академия Наук", "Восток"] as const;
 
 /** Время работы менеджера (по Минску). */
 export const managerHours = { from: "11:30", to: "21:15" } as const;

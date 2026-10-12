@@ -1,5 +1,8 @@
 import type { ProductGroup, ProductItem, StockStatus } from "@/lib/types";
 
+/** Позиция до присвоения id — его выставляет сборка каталога. */
+export type ParsedGroup = Omit<ProductGroup, "id">;
+
 /*
  * Парсер листа прайса. Лист устроен блоками:
  *
@@ -11,6 +14,11 @@ import type { ProductGroup, ProductItem, StockStatus } from "@/lib/types";
  *          | Ананас - Описание | ✅    ← товары: колонка A пустая, B — название, далее отметка
  *          | GTX | 0.6 Ом | ✅         ← доп. колонка = вариант (сопротивление и т.п.)
  *          |     | 0.8 Ом | ❌         ← пустое название = то же, что строкой выше
+ *
+ *   Картриджи                         ← подраздел (известное слово над брендами)
+ *
+ * Фото (картинка в ячейке колонки A) относится к позиции в своей строке,
+ * а первое фото линейки становится её обложкой.
  */
 
 const PRICE_RE = /^(\d+(?:[.,]\d+)?)\s*(?:byn|бун|руб\.?|р\.?)$/i;
@@ -24,6 +32,9 @@ const LEADING_EMOJI_RE =
   /^(?:[\p{Extended_Pictographic}\p{Emoji_Modifier}\u{1F1E6}-\u{1F1FF}‍️⃣]|\s)+/u;
 const STRENGTH_MG_RE = /(\d+(?:[.,]\d+)?)\s*(?:mg|мг)(?![a-zа-я])/i;
 const STRENGTH_PCT_RE = /(\d+(?:[.,]\d+)?)\s*%/;
+
+/** Заголовки-подразделы листа: стоят над брендами, а не над товарами. */
+const SECTION_RE = /^(?:картридж|испарител)/i;
 
 /** Строки-объявления, которые не являются товарами. */
 const NOTICE_RE = /внимание|для заказа|@\w{3,}|t\.me\//i;
@@ -80,42 +91,63 @@ const isNotice = (text: string) => NOTICE_RE.test(text) || text.length > NOTICE_
 
 type RowKind = "start" | "blank" | "header" | "note" | "price" | "item";
 
-export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[] {
-  const groups: ProductGroup[] = [];
+export function parseSheet(
+  rows: unknown[][],
+  categoryId: string,
+  images: Record<number, string> = {},
+): ParsedGroup[] {
+  const groups: ParsedGroup[] = [];
 
   let lastKind: RowKind = "start";
   let pendingHeaders: string[] = [];
   let pendingNote: string | undefined;
   let brand: string | undefined;
-  let group: ProductGroup | null = null;
+  let section: string | undefined;
+  let group: ParsedGroup | null = null;
   let price: number | null = null;
   let oldPrice: number | undefined;
   let prevRowHadPrice = false;
   let itemsSincePrice: ProductItem[] = [];
   let lastItemName: string | undefined;
+  let lastItemImage: string | undefined;
+  /** Фото со строки заголовка/цены — достанется линейке. */
+  let pendingImage: string | undefined;
 
   const openGroup = () => {
     if (pendingHeaders.length === 0 && group) return group;
     let line = "";
     if (pendingHeaders.length > 0) {
       line = pendingHeaders[pendingHeaders.length - 1];
-      if (pendingHeaders.length > 1) brand = pendingHeaders.slice(0, -1).join(" · ");
+      if (pendingHeaders.length > 1) {
+        const above = pendingHeaders.slice(0, -1);
+        const sectionTitle = above.find((h) => SECTION_RE.test(h));
+        const brands = above.filter((h) => !SECTION_RE.test(h));
+        if (sectionTitle) {
+          section = sectionTitle;
+          brand = undefined;
+        }
+        if (brands.length) brand = brands.join(" · ");
+      }
     }
     group = {
       categoryId,
       line,
       ...(brand && { brand }),
+      ...(section && { section }),
       ...(parseStrength(line) && { strength: parseStrength(line) }),
       ...(pendingNote && { note: pendingNote }),
+      ...(pendingImage && { image: pendingImage }),
       items: [],
     };
     groups.push(group);
     pendingHeaders = [];
     pendingNote = undefined;
+    pendingImage = undefined;
     price = null;
     oldPrice = undefined;
     itemsSincePrice = [];
     lastItemName = undefined;
+    lastItemImage = undefined;
     return group;
   };
 
@@ -136,7 +168,7 @@ export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[
     itemsSincePrice = [];
   };
 
-  const addItem = (cells: string[]) => {
+  const addItem = (cells: string[], image: string | undefined) => {
     const target = openGroup();
 
     let statusIndex = -1;
@@ -155,12 +187,20 @@ export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[
     const extra = textCells.slice(1).filter((c) => c && !PLACEHOLDER_RE.test(c));
 
     let rawName = first;
+    let continuation = false;
     if (!rawName) {
-      if (lastItemName) rawName = lastItemName;
-      else rawName = extra.shift() ?? "";
+      if (lastItemName) {
+        rawName = lastItemName;
+        continuation = true;
+      } else rawName = extra.shift() ?? "";
     }
     if (!rawName) return;
     lastItemName = rawName;
+
+    // Строка-продолжение (то же название, другой вариант) берёт фото предыдущей.
+    const itemImage = image ?? (continuation ? lastItemImage : undefined);
+    lastItemImage = itemImage;
+    if (itemImage && !target.image) target.image = itemImage;
 
     const variant = extra.join(" · ");
     const item: ProductItem = {
@@ -169,19 +209,22 @@ export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[
       price,
       ...(oldPrice !== undefined && { oldPrice }),
       status,
+      ...(itemImage && { image: itemImage }),
     };
     target.items.push(item);
     itemsSincePrice.push(item);
   };
 
-  for (const rawRow of rows) {
+  rows.forEach((rawRow, rowIndex) => {
+    const image = images[rowIndex];
     const cells = (rawRow ?? []).map(clean);
     while (cells.length && !cells[cells.length - 1]) cells.pop();
 
     if (cells.length === 0) {
       lastKind = "blank";
       prevRowHadPrice = false;
-      continue;
+      if (image) pendingImage ??= image;
+      return;
     }
 
     const [first, ...rest] = cells;
@@ -190,28 +233,31 @@ export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[
 
     if (hasItem) {
       if (rowPrice !== null) applyPrice(rowPrice);
-      addItem(rest);
+      addItem(rest, image);
       prevRowHadPrice = rowPrice !== null;
       lastKind = "item";
-      continue;
+      return;
     }
 
     if (rowPrice !== null) {
       applyPrice(rowPrice);
+      if (image && group && !group.image) group.image = image;
       prevRowHadPrice = true;
       lastKind = "price";
-      continue;
+      return;
     }
     prevRowHadPrice = false;
 
     // Объявления и одиночные ✅/❌ в колонке A пропускаем, не меняя контекст.
-    if (isNotice(first) || parseStatus(first)) continue;
+    if (isNotice(first) || parseStatus(first)) return;
+
+    if (image) pendingImage ??= image;
 
     if (lastKind === "header" && pendingHeaders.length > 0) {
       // Текст сразу под заголовком без пустой строки — это пояснение к линейке.
       pendingNote = pendingNote ? `${pendingNote} ${first}` : first;
       lastKind = "note";
-      continue;
+      return;
     }
 
     if (pendingHeaders.length > 0 && (lastKind === "blank" || lastKind === "note")) {
@@ -222,7 +268,7 @@ export function parseSheet(rows: unknown[][], categoryId: string): ProductGroup[
       pendingNote = undefined;
     }
     lastKind = "header";
-  }
+  });
 
   return groups.filter((g) => g.items.length > 0);
 }

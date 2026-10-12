@@ -116,8 +116,8 @@ export function describeDelivery(form: CheckoutForm): string {
   }
 }
 
-/** Текст заказа для менеджера в Telegram. */
-export function buildOrderMessage(items: CartItem[], form: CheckoutForm): string {
+/** Текст заказа для менеджера в Telegram. `store` — точка, откуда заказ. */
+export function buildOrderMessage(items: CartItem[], form: CheckoutForm, store?: string): string {
   const lines = items.map((item, i) => {
     const total = lineTotal(item);
     const price = total === null ? "цена по запросу" : formatPrice(total);
@@ -125,5 +125,11 @@ export function buildOrderMessage(items: CartItem[], form: CheckoutForm): string
   });
   const { sum, hasUnpriced } = cartTotals(items);
   const total = `Итого: ${formatPrice(sum)}${hasUnpriced ? " + позиции с ценой по запросу" : ""}`;
-  return ["Новый заказ!", ...lines, total, `Способ получения: ${describeDelivery(form)}`].join("\n");
+  return [
+    "Новый заказ!",
+    ...(store ? [`Точка: ${store}`] : []),
+    ...lines,
+    total,
+    `Способ получения: ${describeDelivery(form)}`,
+  ].join("\n");
 }

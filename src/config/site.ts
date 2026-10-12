@@ -4,6 +4,8 @@
  */
 export const siteConfig = {
   name: "VapeTochka",
+  /** Как магазин называется на экране — как на логотипе. */
+  displayName: "Vape Точка",
   description:
     "Каталог VapeTochka: жидкости, поды, одноразки, расходники. Актуальное наличие и цены, заказ в Telegram.",
   currency: "BYN",
@@ -11,10 +13,15 @@ export const siteConfig = {
   telegramManager: process.env.NEXT_PUBLIC_TG_MANAGER || "VapeTochkaManager",
 } as const;
 
+/**
+ * Как читаются таблицы. ID самих таблиц — в src/config/stores.ts
+ * (у каждой точки продаж своя таблица).
+ */
 export const sheetsConfig = {
-  /** ID таблицы — часть ссылки между /d/ и /edit. */
-  spreadsheetId: process.env.GOOGLE_SHEET_ID || "1T3SgqBTTdbUlBjC4UnRKk0G8mbqJK-5RJigP7azr3Rc",
-  /** Ключ Google API. Если задан — листы подхватываются автоматически. */
+  /**
+   * Ключ Google API (необязательно). Без ключа список листов и фото
+   * читаются из опубликованной по ссылке таблицы, а данные — CSV-выгрузкой.
+   */
   apiKey: process.env.GOOGLE_API_KEY || "",
   /**
    * Листы, которые никогда не показываются на сайте (через запятую в .env).
@@ -31,21 +38,8 @@ export const sheetsConfig = {
   wholesaleSheet: process.env.WHOLESALE_SHEET ?? "ОПТ",
   /** Колонки, которые читаются с каждого листа. */
   columns: "A:H",
-  /**
-   * Режим без API-ключа: какие листы читать (название + gid из ссылки).
-   * gid — число после "#gid=" в адресной строке, когда открыт нужный лист.
-   */
-  csvTabs: [
-    { title: "Жидкости ( salt)", gid: "618442738" },
-    { title: "Расходники ", gid: "697847360" },
-    { title: "Одноразки", gid: "1156669168" },
-    { title: "Снюс", gid: "1228656279" },
-    { title: "Пластины", gid: "1565031505" },
-    { title: "Поды", gid: "1209278120" },
-    { title: "Койла, Вата и др.", gid: "381658474" },
-    { title: "Кальяный табак", gid: "942197141" },
-    { title: "Напитки", gid: "1286166836" },
-  ],
+  /** Подписи оптовых цен по порядку колонок листа «ОПТ». */
+  wholesaleTiers: ["от 10 шт", "от 30 шт", "от 50 шт", "от 100 шт"],
 } as const;
 
 export const cacheConfig = {

@@ -3,7 +3,7 @@ import { demoSheets } from "@/data/demo-sheets";
 import { buildCatalog } from "@/lib/catalog";
 import { displayLine, flattenGroups, productTitle } from "@/lib/products";
 import { buildHaystack, matches, parseQuery } from "@/lib/search";
-import { orderMessage, telegramLink } from "@/lib/telegram";
+import { isDesktopDevice, orderMessage, telegramLink } from "@/lib/telegram";
 
 const catalog = buildCatalog(demoSheets, "demo");
 const products = flattenGroups(catalog.groups);
@@ -47,6 +47,21 @@ describe("telegram", () => {
     const link = telegramLink(text);
     expect(link.app).toBe(`tg://resolve?domain=VapeTochkaManager&text=${encodeURIComponent(text)}`);
     expect(link.web).toBe(`https://t.me/VapeTochkaManager?text=${encodeURIComponent(text)}`);
+    expect(link.plain).toEqual({ app: "tg://resolve?domain=VapeTochkaManager", web: "https://t.me/VapeTochkaManager" });
+    expect(link.text).toBe(text);
+  });
+
+  it("tells computers from phones", () => {
+    const mac = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15";
+    const win = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36";
+    const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148";
+    const android = "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36";
+    expect(isDesktopDevice(mac, 0)).toBe(true);
+    expect(isDesktopDevice(win, 0)).toBe(true);
+    expect(isDesktopDevice(iphone, 5)).toBe(false);
+    expect(isDesktopDevice(android, 5)).toBe(false);
+    // iPad с iPadOS притворяется Mac, но у него сенсорный экран.
+    expect(isDesktopDevice(mac, 5)).toBe(false);
   });
 
   it("asks about restock for unavailable items", () => {

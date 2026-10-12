@@ -86,6 +86,13 @@ describe("checkout", () => {
       phone: "+375 29 000-00-00",
     });
     expect(delivery).toContain("1. Под x1 (цена по запросу)");
+    const pickup = buildOrderMessage(
+      cart.slice(0, 1),
+      { ...emptyCheckoutForm, method: "pickup", pickupPoint: "м. Каменная Горка" },
+      "Каменная Горка",
+    );
+    expect(pickup.split("\n").slice(0, 2)).toEqual(["Новый заказ!", "Точка: Каменная Горка"]);
+    expect(pickup).toContain("Способ получения: Самовывоз (м. Каменная Горка)");
     expect(delivery).toContain("Итого: 0 BYN + позиции с ценой по запросу");
     expect(delivery).toContain("Способ получения: Доставка (ул. Ленина 1, +375 29 000-00-00)");
   });

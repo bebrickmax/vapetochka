@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { metroLines, pickupPoints } from "@/config/checkout";
 import { siteConfig } from "@/config/site";
+import type { StoreInfo } from "@/config/stores";
 import {
   buildOrderMessage,
   emptyCheckoutForm,
@@ -16,7 +17,7 @@ import {
 import { formatPrice, pluralize } from "@/lib/format";
 import { telegramLink } from "@/lib/telegram";
 import { ArrowLeftIcon, CartIcon, CheckIcon, CloseIcon, TelegramIcon, TrashIcon } from "../icons";
-import { openTelegram } from "../TelegramAnchor";
+import { copyText, openTelegram } from "../TelegramAnchor";
 import { useCart, useCartActions, useCartDrawer } from "./CartProvider";
 import { ManagerHours } from "./ManagerHours";
 import { QtyStepper } from "./QtyStepper";
@@ -24,28 +25,36 @@ import { QtyStepper } from "./QtyStepper";
 type View = "cart" | "checkout" | "sent";
 
 /** Корзина и оформление заказа в выезжающей панели (снизу на телефоне, справа на компьютере). */
-export function CartDrawer() {
+export function CartDrawer({ store }: { store: StoreInfo }) {
   const { open, setOpen } = useCartDrawer();
   // Форма живёт выше панели — введённое не теряется, если корзину закрыли и открыли снова.
   const [form, setForm] = useState<CheckoutForm>(emptyCheckoutForm);
   const close = useCallback(() => setOpen(false), [setOpen]);
   if (!open) return null;
-  return <DrawerPanel onClose={close} form={form} setForm={setForm} />;
+  return <DrawerPanel onClose={close} form={form} setForm={setForm} store={store} />;
 }
 
 interface DrawerPanelProps {
+  store: StoreInfo;
   onClose: () => void;
   form: CheckoutForm;
   setForm: (form: CheckoutForm) => void;
 }
 
-function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
+function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProps) {
+  // В точке «только самовывоз» способ получения фиксированный.
+  const form: CheckoutForm =
+    store.checkout.kind === "pickup-only"
+      ? { ...rawForm, method: "pickup", pickupPoint: store.checkout.point }
+      : rawForm;
   const { items, totals } = useCart();
   const { clear } = useCartActions();
   const [view, setView] = useState<View>("cart");
   const [submitted, setSubmitted] = useState(false);
   const [sentText, setSentText] = useState("");
   const [copied, setCopied] = useState(false);
+  /** На компьютере чат открывается без текста — его нужно вставить. */
+  const [needsPaste, setNeedsPaste] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
 
@@ -70,14 +79,7 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
   const errors = validateCheckout(items, form);
   const valid = Object.keys(errors).length === 0;
 
-  const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-    } catch {
-      setCopied(false);
-    }
-  };
+  const copy = async (text: string) => setCopied(await copyText(text));
 
   const send = () => {
     setSubmitted(true);
@@ -85,11 +87,11 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
       bodyRef.current?.querySelector<HTMLElement>("[aria-invalid=true]")?.focus();
       return;
     }
-    const text = buildOrderMessage(items, form);
+    const text = buildOrderMessage(items, form, store.title);
     setSentText(text);
     void copy(text); // запасной вариант: если Telegram не подставит текст — его можно вставить
     go("sent");
-    openTelegram(telegramLink(text));
+    setNeedsPaste(openTelegram(telegramLink(text), { silent: true }));
   };
 
   const finish = () => {
@@ -109,7 +111,7 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className="animate-sheet-in sm:animate-panel-in relative flex max-h-[92dvh] w-full flex-col rounded-t-3xl border border-line bg-surface outline-none sm:h-full sm:max-h-none sm:w-[440px] sm:rounded-none sm:rounded-l-3xl"
+        className="animate-sheet-in sm:animate-panel-in relative flex max-h-[92dvh] w-full flex-col rounded-t-[28px] border border-line bg-raised outline-none sm:h-full sm:max-h-none sm:w-[440px] sm:rounded-none sm:rounded-l-[28px]"
       >
         {/* Шапка панели */}
         <div className="flex items-center gap-2 border-b border-line px-4 py-3">
@@ -118,7 +120,7 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
               <ArrowLeftIcon />
             </IconButton>
           )}
-          <h2 className="flex-1 text-lg font-extrabold tracking-tight">{title}</h2>
+          <h2 className="font-wide flex-1 text-lg font-semibold">{title}</h2>
           <IconButton label="Закрыть" onClick={onClose}>
             <CloseIcon />
           </IconButton>
@@ -126,8 +128,12 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
 
         <div ref={bodyRef} className="flex-1 overflow-y-auto overscroll-contain px-4 py-4">
           {view === "cart" && <CartList items={items} onBrowse={onClose} />}
-          {view === "checkout" && <CheckoutFields form={form} setForm={setForm} errors={submitted ? errors : {}} />}
-          {view === "sent" && <SentView text={sentText} copied={copied} onCopy={() => copy(sentText)} />}
+          {view === "checkout" && (
+            <CheckoutFields store={store} form={form} setForm={setForm} errors={submitted ? errors : {}} />
+          )}
+          {view === "sent" && (
+            <SentView text={sentText} copied={copied} needsPaste={needsPaste} onCopy={() => copy(sentText)} />
+          )}
         </div>
 
         {/* Низ панели: итог и главная кнопка */}
@@ -138,7 +144,7 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
           )}
           {view === "checkout" && (
             <>
-              {submitted && errors.cart && <p className="text-sm font-semibold text-neon-pink">{errors.cart}</p>}
+              {submitted && errors.cart && <p className="text-sm font-semibold text-danger">{errors.cart}</p>}
               <PrimaryButton onClick={send} disabled={items.length === 0}>
                 <TelegramIcon />
                 Отправить заказ
@@ -147,14 +153,14 @@ function DrawerPanel({ onClose, form, setForm }: DrawerPanelProps) {
           )}
           {view === "sent" && (
             <>
-              <PrimaryButton onClick={() => openTelegram(telegramLink(sentText))}>
+              <PrimaryButton onClick={() => setNeedsPaste(openTelegram(telegramLink(sentText), { silent: true }))}>
                 <TelegramIcon />
                 Открыть чат с менеджером
               </PrimaryButton>
               <button
                 type="button"
                 onClick={finish}
-                className="h-12 w-full rounded-2xl border border-line bg-surface-2 text-sm font-semibold text-ink/85 transition active:scale-[0.98]"
+                className="h-12 w-full rounded-full border border-line-strong text-sm font-semibold text-ink/85 transition active:scale-[0.98]"
               >
                 Заказ отправлен — очистить корзину
               </button>
@@ -178,7 +184,7 @@ function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void
         <button
           type="button"
           onClick={onBrowse}
-          className="mt-2 h-11 rounded-2xl border border-line bg-surface-2 px-5 text-sm font-semibold transition active:scale-[0.97]"
+          className="mt-2 h-11 rounded-full border border-line-strong px-5 text-sm font-semibold transition active:scale-[0.97]"
         >
           Перейти в каталог
         </button>
@@ -192,7 +198,7 @@ function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void
         {items.map((item) => {
           const total = lineTotal(item);
           return (
-            <li key={item.id} className="rounded-2xl border border-line bg-surface-2/70 p-3">
+            <li key={item.id} className="rounded-2xl border border-line bg-surface p-3">
               <div className="flex items-start gap-2">
                 <p className="flex-1 text-[15px] font-semibold leading-snug text-ink">{item.title}</p>
                 <button
@@ -213,7 +219,7 @@ function CartList({ items, onBrowse }: { items: CartItem[]; onBrowse: () => void
                   className="w-32"
                 />
                 <div className="text-right">
-                  <p className="text-base font-black tabular-nums">
+                  <p className="font-wide text-[15px] font-semibold tabular-nums">
                     {total === null ? "Цена по запросу" : formatPrice(total)}
                   </p>
                   {item.price !== null && item.qty > 1 && (
@@ -239,13 +245,33 @@ const METHODS: { id: DeliveryMethod; title: string; icon: string; hint: string }
 ];
 
 interface CheckoutFieldsProps {
+  store: StoreInfo;
   form: CheckoutForm;
   setForm: (form: CheckoutForm) => void;
   errors: ReturnType<typeof validateCheckout>;
 }
 
-function CheckoutFields({ form, setForm, errors }: CheckoutFieldsProps) {
+function CheckoutFields({ store, form, setForm, errors }: CheckoutFieldsProps) {
   const set = <K extends keyof CheckoutForm>(key: K, value: CheckoutForm[K]) => setForm({ ...form, [key]: value });
+
+  if (store.checkout.kind === "pickup-only") {
+    return (
+      <form className="space-y-5" onSubmit={(event) => event.preventDefault()} noValidate>
+        <ManagerHours />
+        <div className="rounded-2xl border border-line-strong p-4">
+          <p className="text-sm text-muted">Способ получения</p>
+          <p className="font-wide mt-1 text-[17px] font-semibold">Самовывоз: {store.checkout.point}</p>
+          <p className="mt-1.5 text-sm leading-snug text-muted">
+            Заказ соберём из наличия этой точки. Время, когда можно забрать, подскажет менеджер.
+          </p>
+        </div>
+        <p className="text-xs leading-relaxed text-muted">
+          Заказ откроется в Telegram в чате с @{siteConfig.telegramManager} — останется нажать «Отправить». Текст заказа
+          также копируется в буфер обмена.
+        </p>
+      </form>
+    );
+  }
 
   return (
     <form className="space-y-5" onSubmit={(event) => event.preventDefault()} noValidate>
@@ -259,8 +285,8 @@ function CheckoutFields({ form, setForm, errors }: CheckoutFieldsProps) {
             return (
               <label
                 key={method.id}
-                className={`flex cursor-pointer flex-col items-center gap-1 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.97] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-neon-violet/60 ${
-                  selected ? "border-neon-violet/70 bg-neon-violet/15" : "border-line bg-surface-2/70"
+                className={`flex cursor-pointer flex-col items-center gap-1 rounded-2xl border px-2 py-3 text-center transition active:scale-[0.97] has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-paper ${
+                  selected ? "btn-paper border-paper" : "border-line bg-surface"
                 }`}
               >
                 <input
@@ -274,8 +300,10 @@ function CheckoutFields({ form, setForm, errors }: CheckoutFieldsProps) {
                 <span className="text-2xl" aria-hidden>
                   {method.icon}
                 </span>
-                <span className="text-sm font-bold text-ink">{method.title}</span>
-                <span className="text-[11px] leading-tight text-muted">{method.hint}</span>
+                <span className="text-sm font-bold">{method.title}</span>
+                <span className={`text-[11px] leading-tight ${selected ? "text-black/55" : "text-muted"}`}>
+                  {method.hint}
+                </span>
               </label>
             );
           })}
@@ -319,7 +347,7 @@ function CheckoutFields({ form, setForm, errors }: CheckoutFieldsProps) {
 
       {form.method === "delivery" && (
         <div className="space-y-4">
-          <p className="rounded-2xl border border-neon-pink/40 bg-neon-pink/10 px-3.5 py-3 text-sm font-semibold leading-snug text-neon-pink">
+          <p className="rounded-2xl border border-line-strong px-3.5 py-3 text-sm font-semibold leading-snug text-ink">
             ⚠️ Внимание! За доставку на дом взимается дополнительная плата.
           </p>
           <Field label="Адрес доставки" error={errors.address} id="address">
@@ -358,23 +386,31 @@ function CheckoutFields({ form, setForm, errors }: CheckoutFieldsProps) {
   );
 }
 
-function SentView({ text, copied, onCopy }: { text: string; copied: boolean; onCopy: () => void }) {
+interface SentViewProps {
+  text: string;
+  copied: boolean;
+  needsPaste: boolean;
+  onCopy: () => void;
+}
+
+function SentView({ text, copied, needsPaste, onCopy }: SentViewProps) {
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-3 rounded-2xl border border-neon-green/30 bg-neon-green/10 px-3.5 py-3">
-        <CheckIcon className="shrink-0 text-neon-green" />
+      <div className="flex items-center gap-3 rounded-2xl border border-line-strong px-3.5 py-3">
+        <CheckIcon className="shrink-0 text-ink" />
         <p className="text-sm leading-snug text-ink">
-          Открываем чат с менеджером. Если текст заказа не подставился сам — вставьте его в чат
-          {copied ? " (он уже скопирован)" : ""} и отправьте.
+          {needsPaste
+            ? `Открываем чат с менеджером. ${copied ? "Текст заказа уже скопирован — вставьте" : "Скопируйте текст заказа и вставьте"} его в поле сообщения (⌘V или Ctrl+V) и отправьте.`
+            : `Открываем чат с менеджером. Если текст заказа не подставился сам — вставьте его в чат${copied ? " (он уже скопирован)" : ""} и отправьте.`}
         </p>
       </div>
-      <pre className="whitespace-pre-wrap break-words rounded-2xl border border-line bg-surface-2/70 p-3.5 font-sans text-sm leading-relaxed text-ink/90">
+      <pre className="whitespace-pre-wrap break-words rounded-2xl border border-line bg-surface p-3.5 font-sans text-sm leading-relaxed text-ink/90">
         {text}
       </pre>
       <button
         type="button"
         onClick={onCopy}
-        className="h-11 w-full rounded-2xl border border-line bg-surface-2 text-sm font-semibold transition active:scale-[0.98]"
+        className="h-11 w-full rounded-full border border-line-strong text-sm font-semibold transition active:scale-[0.98]"
       >
         {copied ? "✓ Скопировано" : "Скопировать текст заказа"}
       </button>
@@ -391,8 +427,8 @@ function TotalsRow({ totals }: { totals: CartTotals }) {
       </p>
       <p className="text-right">
         <span className="text-sm text-muted">Итого: </span>
-        <span className="text-2xl font-black tabular-nums tracking-tight">{formatPrice(totals.sum)}</span>
-        {totals.hasUnpriced && <span className="block text-xs text-amber">+ позиции с ценой по запросу</span>}
+        <span className="font-wide text-[22px] font-semibold tabular-nums">{formatPrice(totals.sum)}</span>
+        {totals.hasUnpriced && <span className="block text-xs text-muted">+ позиции с ценой по запросу</span>}
       </p>
     </div>
   );
@@ -403,7 +439,7 @@ function PrimaryButton({ children, ...props }: { children: ReactNode; onClick: (
     <button
       type="button"
       {...props}
-      className="neon-button flex h-14 w-full items-center justify-center gap-2 rounded-2xl text-base font-bold text-white transition-transform active:scale-[0.98] disabled:opacity-50"
+      className="btn-paper flex h-14 w-full items-center justify-center gap-2 rounded-full text-base font-bold transition-transform active:scale-[0.98] disabled:opacity-50"
     >
       {children}
     </button>
@@ -416,7 +452,7 @@ function IconButton({ label, onClick, children }: { label: string; onClick: () =
       type="button"
       onClick={onClick}
       aria-label={label}
-      className="flex size-10 items-center justify-center rounded-xl text-ink/80 transition active:scale-90 active:bg-white/10"
+      className="flex size-10 items-center justify-center rounded-full text-ink/80 transition active:scale-90 active:bg-white/10"
     >
       {children}
     </button>
@@ -431,7 +467,7 @@ function Field({ label, error, id, children }: { label: string; error?: string; 
       </label>
       {children}
       {error && (
-        <p id={`${id}-error`} className="text-xs font-semibold text-neon-pink">
+        <p id={`${id}-error`} className="text-xs font-semibold text-danger">
           {error}
         </p>
       )}
@@ -440,8 +476,8 @@ function Field({ label, error, id, children }: { label: string; error?: string; 
 }
 
 const inputClass = (invalid: boolean) =>
-  `h-12 w-full rounded-2xl border bg-surface-2/90 px-4 text-base text-ink outline-none transition placeholder:text-muted/70 focus:border-neon-violet/60 focus:shadow-[0_0_0_4px] focus:shadow-neon-violet/15 ${
-    invalid ? "border-neon-pink/70" : "border-line"
+  `h-12 w-full rounded-2xl border bg-surface px-4 text-base text-ink outline-none transition placeholder:text-muted focus:border-ink ${
+    invalid ? "border-danger" : "border-line"
   }`;
 
 interface SelectProps {
