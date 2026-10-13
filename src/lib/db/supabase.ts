@@ -7,8 +7,8 @@
 const PAGE = 1000; // Supabase по умолчанию отдаёт не больше 1000 строк за запрос
 
 function env() {
-  const url = (process.env.SUPABASE_URL ?? "").replace(/\/+$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const url = (process.env.SUPABASE_URL ?? "").trim().replace(/\/+$/, "").replace(/\/rest\/v1$/, "");
+  const key = (process.env.SUPABASE_SERVICE_ROLE_KEY ?? "").trim();
   return { url, key };
 }
 
@@ -26,9 +26,17 @@ export class DbError extends Error {
   }
 }
 
+/**
+ * Подходят оба вида ключа из Supabase → Settings → API Keys:
+ * новый секретный `sb_secret_…` (передаётся только в `apikey`) и старый service_role (JWT `eyJ…`,
+ * ему нужен ещё и `Authorization: Bearer`).
+ */
+export function authHeaders(key: string): Record<string, string> {
+  return key.startsWith("eyJ") ? { apikey: key, Authorization: `Bearer ${key}` } : { apikey: key };
+}
+
 function headers(extra: Record<string, string> = {}): Record<string, string> {
-  const { key } = env();
-  return { apikey: key, Authorization: `Bearer ${key}`, ...extra };
+  return { ...authHeaders(env().key), ...extra };
 }
 
 async function request(path: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
