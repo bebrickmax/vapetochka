@@ -1,6 +1,6 @@
-import type { AdminStock, SheetData } from "@/lib/admin/sheet-view";
-import type { StoreSource } from "@/lib/db/overrides";
+import type { StoreSource } from "@/lib/db/sync";
 import type { DbCategory, DbItem, DbLine, DbStock } from "@/lib/db/types";
+import { num, sheetInStock } from "@/lib/overrides";
 import { toPrice } from "@/lib/db/types";
 import { matches, normalize, parseQuery } from "@/lib/search";
 import { alphabeticalOrderByLine } from "@/lib/sort";
@@ -11,27 +11,43 @@ export interface AdminData {
   categories: DbCategory[];
   lines: DbLine[];
   items: DbItem[];
-  stock: AdminStock[];
-  /** Откуда каждая точка берёт товары. */
+  stock: DbStock[];
+  /** Откуда каждая точка берёт товары: «от таблицы» (база синхронизируется с Google Таблицей) или «от админки». */
   sources: Record<string, StoreSource>;
-  /** Товары таблицы с правками — для точек «от таблицы». */
-  sheets: Record<string, SheetData>;
-  sheetErrors: Record<string, string>;
-  /** В базе есть таблицы настроек и правок (schema.sql обновлён). */
+  /** Время последней синхронизации с таблицей. */
+  syncedAt: Record<string, string | null>;
+  /** В базе есть всё для синхронизации с таблицей (schema.sql обновлён). */
   schemaReady: boolean;
 }
 
-/** Данные, которые показывает экран выбранной точки: таблица (с правками) или база. */
-export function viewData(data: AdminData, storeId: string): AdminData {
-  const sheet = data.sources[storeId] === "sheet" ? data.sheets[storeId] : undefined;
-  return sheet ? { ...data, categories: sheet.categories, lines: sheet.lines, items: sheet.items, stock: sheet.stock } : data;
+/**
+ * Что пришло из таблицы и поэтому меняется в таблице: позиции, которые синхронизация ведёт
+ * в точках «от таблицы», и их линейки. Наличие, цена и фото у них правятся и здесь.
+ */
+export function sheetLocks(data: AdminData): { items: Set<string>; lines: Set<string> } {
+  const items = new Set<string>();
+  if (data.schemaReady)
+    for (const s of data.stock) if (s.sheet_status && data.sources[s.store_id] === "sheet") items.add(s.item_id);
+  const lines = new Set(data.items.filter((i) => items.has(i.id)).map((i) => i.line_id));
+  return { items, lines };
+}
+
+/**
+ * Отличается ли позиция от таблицы (правка из админки ещё действует).
+ * null — позиция не из таблицы или точка работает от админки.
+ */
+export function sheetDiff(data: AdminData, stock: DbStock): { stock: boolean; price: boolean; inStock: boolean; sheetPrice: number | null } | null {
+  if (!stock.sheet_status || data.sources[stock.store_id] !== "sheet") return null;
+  const inStock = sheetInStock(stock.sheet_status);
+  const sheetPrice = num(stock.sheet_price);
+  return { stock: stock.in_stock !== inStock, price: num(stock.price) !== sheetPrice, inStock, sheetPrice };
 }
 
 export const stockKey = (itemId: string, storeId: string) => `${itemId}|${storeId}`;
 
 export interface ItemView {
   item: DbItem;
-  stock: AdminStock;
+  stock: DbStock;
   price: number | null;
 }
 
@@ -68,7 +84,7 @@ function commonPrice(items: ItemView[]): number | null {
 export function buildView(data: AdminData, filters: Filters): LineView[] {
   const categories = new Map(data.categories.map((c) => [c.id, c]));
   const categoryOrder = new Map(data.categories.map((c) => [c.id, c.sort]));
-  const stock = new Map<string, AdminStock>();
+  const stock = new Map<string, DbStock>();
   for (const s of data.stock) if (s.store_id === filters.storeId) stock.set(s.item_id, s);
 
   const itemsByLine = new Map<string, ItemView[]>();
@@ -155,49 +171,6 @@ export function sortItems(data: AdminData, lineIds?: string[]): AdminData {
   const order = alphabeticalOrderByLine(data.items, lineIds ? new Set(lineIds) : undefined);
   if (order.size === 0) return data;
   return { ...data, items: data.items.map((i) => (order.has(i.id) ? { ...i, sort: order.get(i.id)! } : i)) };
-}
-
-// ─── Точка «от таблицы»: правки поверх неё ─────────────────────────────────
-
-function patchSheet(data: AdminData, storeId: string, map: (s: AdminStock) => AdminStock): AdminData {
-  const sheet = data.sheets[storeId];
-  if (!sheet) return data;
-  const stock = sheet.stock.map(map);
-  const overrides = stock.filter((s) => s.sheet?.stockOverridden || s.sheet?.priceOverridden).length;
-  return { ...data, sheets: { ...data.sheets, [storeId]: { ...sheet, stock, overrides } } };
-}
-
-/** Наличие/цена поверх таблицы — так же, как посчитает сервер: значение «как в таблице» снимает правку. */
-export function patchSheetStock(
-  data: AdminData,
-  storeId: string,
-  itemIds: string[],
-  patch: { inStock?: boolean; price?: number | null },
-): AdminData {
-  const ids = new Set(itemIds);
-  return patchSheet(data, storeId, (s) => {
-    if (!ids.has(s.item_id) || !s.sheet) return s;
-    const next = { ...s, sheet: { ...s.sheet } };
-    if (patch.inStock !== undefined) {
-      next.in_stock = patch.inStock;
-      next.sheet.stockOverridden = patch.inStock !== s.sheet.inStock;
-    }
-    if (patch.price !== undefined) {
-      next.price = patch.price;
-      next.sheet.priceOverridden = patch.price !== s.sheet.price;
-    }
-    return next;
-  });
-}
-
-/** «Как в таблице»: снять правки с позиций (без списка — со всей точки). */
-export function resetSheetStock(data: AdminData, storeId: string, itemIds?: string[]): AdminData {
-  const ids = itemIds && new Set(itemIds);
-  return patchSheet(data, storeId, (s) =>
-    (ids && !ids.has(s.item_id)) || !s.sheet
-      ? s
-      : { ...s, in_stock: s.sheet.inStock, price: s.sheet.price, sheet: { ...s.sheet, stockOverridden: false, priceOverridden: false } },
-  );
 }
 
 export function removeItem(data: AdminData, id: string): AdminData {

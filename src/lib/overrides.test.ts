@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { sheetAdminData } from "@/lib/admin/sheet-view";
 import { applyOverrides, nextOverride, sheetValues, type SheetOverride } from "./overrides";
 import { toProduct } from "./products";
-import type { Catalog, ProductGroup, StockStatus } from "./types";
+import type { ProductGroup, StockStatus } from "./types";
 
 const group = (items: [string, StockStatus, number | null][]): ProductGroup => ({
   id: "liquids-abc",
@@ -55,12 +54,4 @@ describe("overrides on top of the sheet", () => {
     expect(applyOverrides([sheet], [orphan]).cleanup.remove).toEqual(["liquids-gone-1"]);
   });
 
-  it("builds the admin view with sheet values next to the overrides", () => {
-    const catalog: Catalog = { storeId: "main", categories: [{ id: "liquids", title: "Жидкости", icon: "", sheetTitle: "Жидкости" }], groups: [sheet], updatedAt: "", source: "csv" };
-    const data = sheetAdminData(catalog, [nextOverride(undefined, base(0), { inStock: false })!]);
-    expect(data.overrides).toBe(1);
-    expect(data.items.map((i) => i.title)).toEqual(["Банан", "Арбуз"]);
-    expect(data.stock[0]).toMatchObject({ in_stock: false, price: 15, sheet: { inStock: true, stockOverridden: true, priceOverridden: false } });
-    expect(data.stock[1]).toMatchObject({ in_stock: true, sheet: { stockOverridden: false } });
-  });
 });

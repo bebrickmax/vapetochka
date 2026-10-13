@@ -74,6 +74,19 @@ create table if not exists sheet_overrides (
   primary key (store_id, product_id)
 );
 
+-- Зеркало Google Таблицы (точка «от таблицы»): база синхронизируется с таблицей, админка дописывает своё.
+--   sheet_key у линеек и позиций — по нему строка узнаётся в таблице (null — добавлено в админке);
+--   sheet_status / sheet_price у наличия — значения таблицы с прошлой синхронизации: таблица меняет
+--   наличие и цену, только если они изменились в ней самой («кто изменил последним, тот и прав»).
+alter table product_lines add column if not exists sheet_key text;
+alter table items         add column if not exists sheet_key text;
+alter table item_stock    add column if not exists sheet_status text;
+alter table item_stock    add column if not exists sheet_price numeric(10, 2);
+alter table store_settings add column if not exists synced_at timestamptz;  -- последняя синхронизация
+alter table store_settings add column if not exists sync_lock timestamptz;  -- идёт синхронизация (защита от двойного запуска)
+create unique index if not exists product_lines_sheet_key_uq on product_lines (category_id, sheet_key);
+create unique index if not exists items_sheet_key_uq on items (line_id, sheet_key);
+
 -- updated_at обновляется сам.
 create or replace function touch_updated_at() returns trigger language plpgsql as $$
 begin
@@ -118,3 +131,6 @@ insert into categories (id, title, sort) values
   ('hookah',      'Кальян',       80),
   ('drinks',      'Напитки',      90)
 on conflict (id) do nothing;
+
+-- Чтобы API базы сразу увидел новые колонки.
+notify pgrst, 'reload schema';

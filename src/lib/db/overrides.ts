@@ -2,33 +2,12 @@ import type { OverrideCleanup, SheetOverride } from "@/lib/overrides";
 import { DbError, inList, insert, isDbConfigured, remove, selectAll } from "./supabase";
 
 /*
- * Настройки точек и правки поверх таблицы в базе.
- * Если таблиц ещё нет (schema.sql не перезапущен после обновления) — функции
- * возвращают null, и сайт работает как раньше.
+ * Быстрые правки поверх таблицы (запасной режим витрины, пока в базе нет колонок зеркала таблицы).
+ * Если таблицы правок нет — функции возвращают null, и сайт показывает саму таблицу.
  */
-
-export type StoreSource = "sheet" | "db";
 
 /** Таблицы нет в базе: PostgREST отвечает 404. */
 const isMissingTable = (error: unknown) => error instanceof DbError && error.status === 404;
-
-export const SCHEMA_HINT = "Обновите базу: в Supabase → SQL Editor выполните supabase/schema.sql ещё раз.";
-
-/** Источник каждой точки (нет строки — «таблица»). null — таблицы настроек нет. */
-export async function loadStoreSources(): Promise<Record<string, StoreSource> | null> {
-  if (!isDbConfigured()) return null;
-  try {
-    const rows = await selectAll<{ store_id: string; source: StoreSource }>("store_settings");
-    return Object.fromEntries(rows.map((r) => [r.store_id, r.source]));
-  } catch (error) {
-    if (isMissingTable(error)) return null;
-    throw error;
-  }
-}
-
-export async function setStoreSource(storeId: string, source: StoreSource): Promise<void> {
-  await insert("store_settings", { store_id: storeId, source }, { onConflict: "store_id" });
-}
 
 /** Правки точки. null — таблицы правок нет. */
 export async function loadOverrides(storeId: string): Promise<SheetOverride[] | null> {
