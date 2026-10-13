@@ -4,7 +4,7 @@ import { matches, normalize, parseQuery } from "@/lib/search";
 
 /** Данные админки — как их отдаёт GET /api/admin/catalog. */
 export interface AdminData {
-  stores: { id: string; title: string }[];
+  stores: { id: string; title: string; short?: string }[];
   categories: DbCategory[];
   lines: DbLine[];
   items: DbItem[];

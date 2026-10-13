@@ -2,6 +2,7 @@
 
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import type { DbLine, DbStock } from "@/lib/db/types";
+import { pluralize } from "@/lib/format";
 import { sizedPhoto } from "@/lib/photos";
 import { CloseIcon, PlusIcon, SearchIcon } from "../icons";
 import { LogoMark } from "../Logo";
@@ -216,7 +217,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               ...(patch.price !== undefined && { price: patch.price }),
             }),
           () => api("/api/admin/stock", { method: "PATCH", body: { updates: itemIds.map((itemId) => ({ itemId, storeId, ...patch })) } }),
-          itemIds.length > 1 ? `Готово: ${itemIds.length} позиций` : undefined,
+          itemIds.length > 1 ? `Готово: ${itemIds.length} ${pluralize(itemIds.length, ["позиция", "позиции", "позиций"])}` : undefined,
         ),
       updateItem: (id, patch) =>
         optimistic(
@@ -299,7 +300,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     const ids = visibleItems.map((v) => v.item.id);
     if (ids.length === 0) return;
     const what = inStock ? "«в наличии»" : "«нет в наличии»";
-    if (!window.confirm(`Отметить ${ids.length} показанных позиций как ${what} в точке «${store.title}»?`)) return;
+    if (!window.confirm(`Отметить ${ids.length} ${pluralize(ids.length, ["показанную позицию", "показанные позиции", "показанных позиций"])} как ${what} в точке «${store.title}»?`)) return;
     void actions.setStock(ids, { inStock });
   };
 
@@ -324,7 +325,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
                   s.id === storeId ? "btn-paper" : "text-ink/75"
                 }`}
               >
-                {s.title}
+                {s.short ?? s.title}
               </button>
             ))}
           </div>
@@ -475,7 +476,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               },
             );
             setOpen(null);
-            notify(`Добавлено: ${items.length}`);
+            notify(`Добавлено: ${items.length} ${pluralize(items.length, ["позиция", "позиции", "позиций"])}`);
           }}
         />
       )}
