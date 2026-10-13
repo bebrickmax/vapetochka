@@ -398,7 +398,7 @@ const pickStock = (s: DbStock): DbStock => ({
 export function planCleanup(
   snapshot: DbSnapshot,
   removedStock: { storeId: string; itemIds: string[] },
-  keepLines: Set<string>,
+  keep: { lines: Set<string>; items: Set<string> },
   ctx: SyncContext,
 ) {
   const removed = new Set(removedStock.itemIds);
@@ -407,12 +407,13 @@ export function planCleanup(
     if (s.store_id === removedStock.storeId && removed.has(s.item_id)) continue;
     stockLeft.add(s.item_id);
   }
-  const items = snapshot.items.filter((i) => removed.has(i.id) && !stockLeft.has(i.id) && (i.sheet_key || ctx.first));
-  const removedItems = new Set(items.map((i) => i.id));
-  const touchedLines = new Set(items.map((i) => i.line_id));
-  const linesWithItems = new Set(snapshot.items.filter((i) => !removedItems.has(i.id)).map((i) => i.line_id));
-  const lines = snapshot.lines.filter(
-    (l) => touchedLines.has(l.id) && !linesWithItems.has(l.id) && !keepLines.has(l.id) && (l.sheet_key || ctx.first),
+  // Позиция без единой строки наличия нигде не показывается — это остаток. Добавленные в админке (без ключа)
+  // трогаем только при первой синхронизации: в обычное время админка как раз может создавать их в эту секунду.
+  const items = snapshot.items.filter(
+    (i) => !stockLeft.has(i.id) && !keep.items.has(i.id) && (i.sheet_key || ctx.first || removed.has(i.id)),
   );
+  const removedItems = new Set(items.map((i) => i.id));
+  const linesWithItems = new Set(snapshot.items.filter((i) => !removedItems.has(i.id)).map((i) => i.line_id));
+  const lines = snapshot.lines.filter((l) => !linesWithItems.has(l.id) && !keep.lines.has(l.id) && (l.sheet_key || ctx.first));
   return { items: [...removedItems], lines: lines.map((l) => l.id) };
 }

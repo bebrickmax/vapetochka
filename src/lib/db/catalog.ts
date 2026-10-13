@@ -10,10 +10,11 @@ const bySort = <T extends { sort: number }>(a: T, b: T) => a.sort - b.sort;
 /** Весь каталог из базы (все точки) — для витрины и админки. */
 export async function loadSnapshot(): Promise<DbSnapshot> {
   const [categories, lines, items, stock] = await Promise.all([
-    selectAll<DbCategory>("categories", { order: "sort.asc" }),
-    selectAll<DbLine>("product_lines", { order: "sort.asc" }),
-    selectAll<DbItem>("items", { order: "sort.asc" }),
-    selectAll<DbStock>("item_stock"),
+    // Порядок с уникальным хвостом (id): иначе страницы по 1000 строк могут пересекаться и терять строки.
+    selectAll<DbCategory>("categories", { order: "sort.asc,id.asc" }),
+    selectAll<DbLine>("product_lines", { order: "sort.asc,id.asc" }),
+    selectAll<DbItem>("items", { order: "sort.asc,id.asc" }),
+    selectAll<DbStock>("item_stock", { order: "item_id.asc,store_id.asc" }),
   ]);
   return { categories, lines, items, stock };
 }
