@@ -64,7 +64,10 @@ function qs(query: Query): string {
   return s ? `?${s}` : "";
 }
 
-/** SELECT всех строк таблицы с постраничной подгрузкой. */
+/**
+ * SELECT всех строк таблицы с постраничной подгрузкой.
+ * Для больших таблиц передавайте order с уникальным хвостом (…,id.asc) — иначе страницы нестабильны.
+ */
 export async function selectAll<T>(table: string, query: Query = {}): Promise<T[]> {
   const rows: T[] = [];
   for (let from = 0; ; from += PAGE) {

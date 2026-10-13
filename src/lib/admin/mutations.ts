@@ -295,7 +295,7 @@ export async function createProducts(body: CreateRequest): Promise<{ line: DbLin
 export async function sortLines(lineIds?: string[]): Promise<number> {
   const ids = lineIds?.map(uuid);
   let items: DbItem[] = [];
-  if (!ids) items = await selectAll<DbItem>("items");
+  if (!ids) items = await selectAll<DbItem>("items", { order: "id.asc" });
   else for (let i = 0; i < ids.length; i += CHUNK) items.push(...(await selectAll<DbItem>("items", { line_id: inList(ids.slice(i, i + CHUNK)) })));
 
   // Линейки из таблицы (точка «от таблицы») держат порядок таблицы — их не трогаем.

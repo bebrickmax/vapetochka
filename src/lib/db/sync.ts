@@ -290,7 +290,7 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
   report.stock = { added: sp.added, updated: sp.updated, removed: sp.remove.length, removalSkipped: sp.removalSkipped };
 
   // 5. Уборка: позиции и линейки из таблицы, которые больше нигде не продаются.
-  const cleanup = planCleanup(snapshot, { storeId, itemIds: sp.remove }, new Set(lineIds.values()), ctx);
+  const cleanup = planCleanup(snapshot, { storeId, itemIds: sp.remove }, { lines: new Set(lineIds.values()), items: new Set(itemIds.values()) }, ctx);
   if (cleanup.items.length) await removeIn("items", "id", cleanup.items);
   if (cleanup.lines.length) await removeIn("product_lines", "id", cleanup.lines);
   report.items.removed = cleanup.items.length;
