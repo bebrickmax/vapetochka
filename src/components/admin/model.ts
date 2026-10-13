@@ -1,6 +1,7 @@
 import type { DbCategory, DbItem, DbLine, DbStock } from "@/lib/db/types";
 import { toPrice } from "@/lib/db/types";
 import { matches, normalize, parseQuery } from "@/lib/search";
+import { alphabeticalOrderByLine } from "@/lib/sort";
 
 /** Данные админки — как их отдаёт GET /api/admin/catalog. */
 export interface AdminData {
@@ -132,6 +133,13 @@ export function patchItem(data: AdminData, id: string, patch: Partial<DbItem>): 
 
 export function patchLine(data: AdminData, id: string, patch: Partial<DbLine>): AdminData {
   return { ...data, lines: data.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)) };
+}
+
+/** Вкусы по алфавиту — так же, как это сделает сервер (без lineIds — во всех линейках). */
+export function sortItems(data: AdminData, lineIds?: string[]): AdminData {
+  const order = alphabeticalOrderByLine(data.items, lineIds ? new Set(lineIds) : undefined);
+  if (order.size === 0) return data;
+  return { ...data, items: data.items.map((i) => (order.has(i.id) ? { ...i, sort: order.get(i.id)! } : i)) };
 }
 
 export function removeItem(data: AdminData, id: string): AdminData {

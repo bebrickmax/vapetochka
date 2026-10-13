@@ -44,6 +44,10 @@ export function ImportSheet({ data, onClose, onDone }: { data: AdminData; onClos
         Импорт переносит линейки, вкусы, цены, наличие и фото из таблицы в базу. Повторный импорт ничего не
         дублирует: он заменяет наличие и цены этой точки на те, что в таблице.
       </p>
+      <p className="rounded-2xl border border-line-strong p-3 text-sm leading-relaxed text-ink/90">
+        Импорт работает в одну сторону: таблица → сайт. Правки из админки в таблицу не попадают. После переноса
+        меняйте товары здесь, а повторный импорт делайте, только если хотите вернуть цены и наличие из таблицы.
+      </p>
 
       <section className="space-y-2">
         <h3 className="font-wide text-base font-semibold">Из Google Таблицы</h3>

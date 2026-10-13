@@ -13,6 +13,8 @@ export interface AdminActions {
   deleteItem: (id: string) => Promise<boolean>;
   updateLine: (id: string, patch: { name?: string; brand?: string | null; note?: string | null; categoryId?: string; imageUrl?: string | null }) => Promise<boolean>;
   deleteLine: (id: string) => Promise<boolean>;
+  /** Вкусы по алфавиту: в указанных линейках или (без аргумента) во всех. */
+  sortLines: (lineIds?: string[]) => Promise<boolean>;
 }
 
 const parsePrice = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
@@ -87,6 +89,9 @@ export function LineSheet({
             Все нет
           </SecondaryButton>
         </div>
+        <SecondaryButton onClick={() => actions.sortLines([line.id])} disabled={busy}>
+          Вкусы по алфавиту А→Я
+        </SecondaryButton>
         <div className="flex gap-2">
           <input
             inputMode="decimal"

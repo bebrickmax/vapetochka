@@ -1,6 +1,7 @@
 import { getStore } from "@/config/stores";
 import { insert, inList, remove, selectAll, update } from "@/lib/db/supabase";
 import type { DbItem, DbLine, DbStock } from "@/lib/db/types";
+import { alphabeticalOrderByLine } from "@/lib/sort";
 import { AdminError } from "./api";
 
 /*
@@ -107,6 +108,7 @@ export async function updateItem(id: string, body: Record<string, unknown>): Pro
   if (Object.keys(patch).length) [item] = await update<DbItem>("items", { id: `eq.${itemId}` }, patch);
   else [item] = await selectAll<DbItem>("items", { id: `eq.${itemId}` });
   if (!item) throw new AdminError("Позиция не найдена", 404);
+  if (patch.title !== undefined || patch.variant !== undefined) await sortLines([item.line_id]);
 
   // В каких точках продаётся: добавляем недостающие строки наличия, лишние убираем.
   if (has(body, "stores")) {
@@ -210,5 +212,27 @@ export async function createProducts(body: CreateRequest): Promise<{ line: DbLin
       targetStores.map((store) => ({ item_id: item.id, store_id: store, price: itemPrice, in_stock: inStock })),
     ),
   );
+  await sortLines([line.id]); // новый вкус сразу встаёт на своё место по алфавиту
   return { line, items };
+}
+
+// ─── Сортировка ─────────────────────────────────────────────────────────────
+
+/**
+ * Расставляет вкусы по алфавиту (эмодзи в начале не учитываются).
+ * Без lineIds — во всех линейках. Пишет только изменившиеся позиции, пачками.
+ */
+export async function sortLines(lineIds?: string[]): Promise<number> {
+  const ids = lineIds?.map(uuid);
+  let items: DbItem[] = [];
+  if (!ids) items = await selectAll<DbItem>("items");
+  else for (let i = 0; i < ids.length; i += CHUNK) items.push(...(await selectAll<DbItem>("items", { line_id: inList(ids.slice(i, i + CHUNK)) })));
+
+  const order = alphabeticalOrderByLine(items);
+  if (order.size === 0) return 0;
+  const rows = items
+    .filter((item) => order.has(item.id))
+    .map((item) => ({ id: item.id, line_id: item.line_id, title: item.title, sort: order.get(item.id)! }));
+  for (let i = 0; i < rows.length; i += 500) await insert("items", rows.slice(i, i + 500), { onConflict: "id" });
+  return rows.length;
 }

@@ -19,6 +19,7 @@ import {
   patchStock,
   removeItem,
   removeLine,
+  sortItems,
   type AdminData,
   type Filters,
   type ItemView,
@@ -227,6 +228,10 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               ...(patch.variant !== undefined && { variant: patch.variant }),
               ...(patch.imageUrl !== undefined && { image_url: patch.imageUrl }),
             });
+            if (patch.title !== undefined || patch.variant !== undefined) {
+              const lineId = next.items.find((i) => i.id === id)?.line_id;
+              if (lineId) next = sortItems(next, [lineId]);
+            }
             if (patch.stores) {
               const current = next.stock.filter((s) => s.item_id === id);
               const template = current[0];
@@ -260,6 +265,12 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           "Сохранено",
         ),
       deleteLine: (id) => optimistic((d) => removeLine(d, id), () => api(`/api/admin/lines/${id}`, { method: "DELETE" }), "Линейка удалена"),
+      sortLines: (lineIds) =>
+        optimistic(
+          (d) => sortItems(d, lineIds),
+          () => api("/api/admin/sort", { body: lineIds?.length === 1 ? { lineId: lineIds[0] } : {} }),
+          "Вкусы расставлены по алфавиту",
+        ),
     }),
     [optimistic, storeId],
   );
@@ -329,7 +340,12 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               </button>
             ))}
           </div>
-          <Menu onImport={() => setOpen({ kind: "import" })} onLogout={async () => { await api("/api/admin/session", { method: "DELETE" }); onLoggedOut(); }} />
+          <Menu
+            onImport={() => setOpen({ kind: "import" })}
+            onSortAll={() => {
+              if (window.confirm("Расставить вкусы по алфавиту во всех линейках? Порядок на сайте тоже поменяется.")) void actions.sortLines();
+            }}
+            onLogout={async () => { await api("/api/admin/session", { method: "DELETE" }); onLoggedOut(); }} />
         </div>
 
         <div className="relative">
@@ -465,15 +481,19 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           onClose={() => setOpen(null)}
           onCreated={({ line, items, stores, price, inStock }) => {
             setData((d) =>
-              d && {
-                ...d,
-                lines: d.lines.some((l) => l.id === line.id) ? d.lines : [...d.lines, line],
-                items: [...d.items, ...items],
-                stock: [
-                  ...d.stock,
-                  ...items.flatMap((i) => stores.map<DbStock>((s) => ({ item_id: i.id, store_id: s, price, old_price: null, in_stock: inStock }))),
-                ],
-              },
+              d &&
+              sortItems(
+                {
+                  ...d,
+                  lines: d.lines.some((l) => l.id === line.id) ? d.lines : [...d.lines, line],
+                  items: [...d.items, ...items],
+                  stock: [
+                    ...d.stock,
+                    ...items.flatMap((i) => stores.map<DbStock>((s) => ({ item_id: i.id, store_id: s, price, old_price: null, in_stock: inStock }))),
+                  ],
+                },
+                [line.id],
+              ),
             );
             setOpen(null);
             notify(`Добавлено: ${items.length} ${pluralize(items.length, ["позиция", "позиции", "позиций"])}`);
@@ -487,7 +507,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
   );
 }
 
-function Menu({ onImport, onLogout }: { onImport: () => void; onLogout: () => void }) {
+function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortAll: () => void; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -506,6 +526,9 @@ function Menu({ onImport, onLogout }: { onImport: () => void; onLogout: () => vo
           <div className="animate-fade-in absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-2xl border border-line bg-raised shadow-xl">
             <button type="button" onClick={() => { setOpen(false); onImport(); }} className="block w-full px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
               Импорт из таблиц
+            </button>
+            <button type="button" onClick={() => { setOpen(false); onSortAll(); }} className="block w-full border-t border-line px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
+              Все вкусы по алфавиту
             </button>
             <a href="/" target="_blank" rel="noopener" className="block border-t border-line px-4 py-3 text-sm font-semibold active:bg-white/10">
               Открыть сайт

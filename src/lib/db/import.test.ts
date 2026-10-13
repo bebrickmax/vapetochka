@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { catalogFromSnapshot } from "./catalog";
+import { createProducts } from "@/lib/admin/mutations";
 import { categoriesFromSheets, categoryFromCsv, importCategories, itemTitle } from "./import";
 import type { DbSnapshot } from "./types";
 
@@ -19,6 +20,10 @@ function fakeSupabase() {
     if (method === "GET") return Response.json(rows.filter(match));
     if (method === "POST") {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>[];
+      if (url.searchParams.get("on_conflict") === "id") {
+        const merged = body.map((r) => Object.assign(rows.find((x) => x.id === r.id) ?? (rows.push({ ...r }), rows.at(-1)!), r));
+        return Response.json(merged, { status: 201 });
+      }
       const added = body
         .filter((r) => !(table === "categories" && rows.some((x) => x.id === r.id)))
         .map((r) => ({ ...(table === "product_lines" || table === "items" ? { id: `00000000-0000-0000-0000-${String(++seq).padStart(12, "0")}` } : {}), ...r }));
@@ -91,5 +96,14 @@ describe("import", () => {
       ["Рик 50mg", ["Банан:16"]],
       ["Drymost 75mg", ["Mint:16"]],
     ]);
+  });
+
+  it("puts a newly added flavor in alphabetical order", async () => {
+    const db = fakeSupabase();
+    await importCategories("main", categoriesFromSheets([sheet("Жидкости", [["Рик 50mg"], ["15 BYN"], ["", "🍌Банан", "✅"], ["", "🍉Арбуз", "✅"]])]));
+    const line = db.snapshot().lines[0];
+    await createProducts({ lineId: line.id, titles: ["🥭Абрикос", "Вишня"], stores: ["main"], price: 15 });
+    const names = catalogFromSnapshot(db.snapshot(), "main").groups[0].items.map((i) => i.name);
+    expect(names).toEqual(["Абрикос", "Арбуз", "Банан", "Вишня"]);
   });
 });
