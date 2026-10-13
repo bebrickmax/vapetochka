@@ -7,7 +7,9 @@ import { proxyImages } from "@/lib/photos";
 import { uniqueKeys } from "@/lib/products";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
-import { fetchStoreSheets, type StoreSheets } from "@/lib/sheets/sources";
+import { catalogFromSnapshot, loadSnapshot } from "@/lib/db/catalog";
+import { isDbConfigured } from "@/lib/db/supabase";
+import { fetchStoreSheets, fetchWholesaleSheet, type StoreSheets } from "@/lib/sheets/sources";
 import { parseWholesaleSheet } from "@/lib/sheets/wholesale";
 import type { Catalog, CatalogSource, Category, ProductGroup, RawSheet, Wholesale } from "@/lib/types";
 
@@ -56,10 +58,20 @@ async function loadSheets(store: Store): Promise<StoreSheets & { source: Catalog
   }
 }
 
+async function loadDbCatalog(store: Store): Promise<Catalog | null> {
+  if (!isDbConfigured() || process.env.CATALOG_SOURCE === "demo") return null;
+  const catalog = catalogFromSnapshot(await loadSnapshot(), store.id);
+  if (catalog.groups.length === 0) return null; // база ещё не заполнена — работаем от таблиц
+  // Оптовые цены пока остаются в листе «ОПТ» Google Таблицы.
+  const wholesaleSheet = await fetchWholesaleSheet(store);
+  const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet, store.id) : undefined;
+  return wholesale ? { ...catalog, wholesale } : catalog;
+}
+
 /**
  * Каталог точки с кэшем: страница отдаётся мгновенно из кэша, а раз в
- * `revalidateSeconds` таблица перечитывается в фоне. Кнопка/скрипт
- * /api/revalidate сбрасывает кэш сразу.
+ * `revalidateSeconds` данные перечитываются в фоне. Любое изменение в админке
+ * (и /api/revalidate) сбрасывает кэш сразу — следующий запрос получит свежие данные.
  */
 export async function getCatalog(storeId: string): Promise<Catalog> {
   "use cache";
@@ -72,6 +84,10 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
 
   const store = getStore(storeId);
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
+
+  // Каталог из базы (админка). Пока база не подключена или пуста — из Google Таблиц.
+  const fromDb = await loadDbCatalog(store);
+  if (fromDb) return fromDb;
 
   const { sheets, wholesale: wholesaleSheet, source } = await loadSheets(store);
   const catalog = buildCatalog(sheets, source, store.id);

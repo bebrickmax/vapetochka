@@ -193,8 +193,13 @@ function ItemRow({ group, itemIndex, showPrice, continuation, photo, photoSlot }
             {item.description && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.description}</p>}
           </>
         )}
-        {(showPrice || item.status === "unknown") && (
+        {(showPrice || item.status !== "in") && (
           <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-[13px]">
+            {out && (
+              <span className="rounded-full border border-line-strong px-2 py-px text-[11px] font-bold uppercase tracking-wide text-ink">
+                Нет в наличии
+              </span>
+            )}
             {showPrice && (
               <span className="font-bold tabular-nums text-ink">
                 {item.price !== null ? formatPrice(item.price) : "Цена по запросу"}

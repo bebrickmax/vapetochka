@@ -47,5 +47,6 @@ export function proxyImages(
 export function sizedPhoto(url: string, size: number): string {
   const allowed = PHOTO_SIZES.find((s) => s >= size) ?? PHOTO_SIZES[PHOTO_SIZES.length - 1];
   if (url.startsWith("/api/photo")) return `${url}&s=${allowed}`;
-  return `${url}=s${allowed}`;
+  if (url.includes("/sheets-images-rt/")) return `${url}=s${allowed}`;
+  return url; // фото из хранилища (Supabase) или внешняя ссылка — как есть
 }

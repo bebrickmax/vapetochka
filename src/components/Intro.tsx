@@ -30,4 +30,4 @@ export function Intro() {
 }
 
 /** Выполняется до отрисовки: повторно за визит заставку не показываем. */
-export const INTRO_SCRIPT = `try{var s=window.sessionStorage;if(s.getItem("vt:intro"))document.documentElement.classList.add("no-intro");else s.setItem("vt:intro","1")}catch(e){}`;
+export const INTRO_SCRIPT = `try{var s=window.sessionStorage;if(location.pathname.indexOf("/admin")===0||s.getItem("vt:intro"))document.documentElement.classList.add("no-intro");else s.setItem("vt:intro","1")}catch(e){}`;
