@@ -9,17 +9,31 @@ import { Field, inputClass, PrimaryButton, SecondaryButton, Sheet, StoreChecks }
 
 type Mode = "replace" | "new";
 
-/** Перенос ассортимента из Google Таблиц (или CSV одного листа) в базу. */
-export function ImportSheet({ data, onClose, onDone }: { data: AdminData; onClose: () => void; onDone: () => void }) {
+/**
+ * Связь с Google Таблицами по точкам:
+ *  «от таблицы» — товары берутся из таблицы сами; можно перенести точку в админку;
+ *  «от админки» — новые товары из таблицы по кнопке, полная замена, возврат на таблицу.
+ */
+export function ImportSheet({
+  data,
+  onClose,
+  onDone,
+  onSwitch,
+}: {
+  data: AdminData;
+  onClose: () => void;
+  onDone: () => void;
+  onSwitch: (source: "sheet" | "db", storeId: string) => void;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [csvStore, setCsvStore] = useState<string[]>([data.stores[0]?.id ?? "main"]);
   const [csvCategory, setCsvCategory] = useState(data.categories[0]?.title ?? "Жидкости");
   const [csvFile, setCsvFile] = useState<File | null>(null);
-  const hasData = data.lines.length > 0;
-  const [csvMode, setCsvMode] = useState<Mode>(hasData ? "new" : "replace");
+  const [csvMode, setCsvMode] = useState<Mode>(data.lines.length > 0 ? "new" : "replace");
 
   const title = (id: string) => data.stores.find((s) => s.id === id)?.title ?? id;
+  const inDb = (id: string) => data.stock.some((s) => s.store_id === id);
   const n = (count: number, forms: [string, string, string]) => `${count} ${pluralize(count, forms)}`;
   const describe = (r: ImportReport) => {
     const photos =
@@ -34,7 +48,10 @@ export function ImportSheet({ data, onClose, onDone }: { data: AdminData; onClos
         photos
       );
     }
-    return `«${title(r.storeId)}»: ${r.lines.total} линеек (новых ${r.lines.created}), ${r.items.total} позиций (новых ${r.items.created})${photos}`;
+    return (
+      `«${title(r.storeId)}»: ${r.lines.total} линеек, ${r.items.total} позиций${photos}` +
+      (r.switched ? ". Точка теперь работает от админки" : "")
+    );
   };
 
   const run = async (key: string, body: object) => {
@@ -50,90 +67,92 @@ export function ImportSheet({ data, onClose, onDone }: { data: AdminData; onClos
     }
   };
 
-  const replaceFromSheets = (storeId: string) => {
-    if (
-      hasData &&
-      !window.confirm(
-        `Заменить цены и наличие «${title(storeId)}» значениями из таблицы? Правки, сделанные в админке для этой точки, пропадут.`,
-      )
-    )
-      return;
-    void run(`replace-${storeId}`, { source: "sheets", storeId, mode: "replace" });
+  const moveToAdmin = (storeId: string) => {
+    const text = inDb(storeId)
+      ? `Перенести «${title(storeId)}» в админку заново? Цены и наличие станут как в таблице, и сайт этой точки будет работать от админки.`
+      : `Перенести «${title(storeId)}» в админку? Товары, цены, наличие и фото скопируются из таблицы, и сайт этой точки будет работать от админки. Вернуть на таблицу можно в любой момент.`;
+    if (window.confirm(text)) void run(`replace-${storeId}`, { source: "sheets", storeId, mode: "replace" });
+  };
+
+  const replaceFromSheet = (storeId: string) => {
+    if (window.confirm(`Заменить цены и наличие «${title(storeId)}» значениями из таблицы? Правки, сделанные в админке для этой точки, пропадут.`))
+      void run(`replace-${storeId}`, { source: "sheets", storeId, mode: "replace" });
   };
 
   const importCsv = async () => {
     if (!csvFile) return;
-    if (csvMode === "replace" && hasData && !window.confirm("Заменить цены и наличие этой категории значениями из файла?")) return;
+    if (csvMode === "replace" && data.lines.length > 0 && !window.confirm("Заменить цены и наличие этой категории значениями из файла?")) return;
     const csv = await csvFile.text();
     for (const storeId of csvStore) await run(`csv-${storeId}`, { source: "csv", storeId, category: csvCategory, csv, mode: csvMode });
   };
 
-  const newSection = (
-    <section className="space-y-2 rounded-2xl border border-line-strong p-3">
-      <h3 className="font-wide text-base font-semibold">Добавить новые товары из таблицы</h3>
-      <p className="text-sm leading-relaxed text-ink/80">
-        Вписали новую линейку или вкус в Google Таблицу — нажмите кнопку точки. Добавится только то, чего ещё нет
-        в админке (с ценой, наличием и фото из таблицы). Цены и наличие остальных товаров не меняются.
-      </p>
-      {data.stores.map((store) => (
-        <PrimaryButton
-          key={store.id}
-          onClick={() => run(`new-${store.id}`, { source: "sheets", storeId: store.id, mode: "new" })}
-          disabled={!!busy}
-        >
-          {busy === `new-${store.id}` ? "Ищу новые товары…" : `Новые из «${store.title}»`}
-        </PrimaryButton>
-      ))}
-    </section>
-  );
-
-  const replaceSection = (
-    <section className="space-y-2">
-      <h3 className="font-wide text-base font-semibold">{hasData ? "Полностью заменить из таблицы" : "Перенести всё из Google Таблицы"}</h3>
-      <p className="text-sm leading-relaxed text-ink/80">
-        {hasData
-          ? "Цены и наличие точки станут такими же, как в таблице, — правки из админки для этой точки пропадут. Новые товары тоже добавятся."
-          : "Переносит линейки, вкусы, цены, наличие и фото. Повторный перенос ничего не дублирует."}
-      </p>
-      {data.stores.map((store) =>
-        hasData ? (
-          <SecondaryButton key={store.id} onClick={() => replaceFromSheets(store.id)} disabled={!!busy}>
-            {busy === `replace-${store.id}` ? "Импортирую… (до пары минут)" : `Заменить «${store.title}»`}
-          </SecondaryButton>
-        ) : (
-          <PrimaryButton key={store.id} onClick={() => replaceFromSheets(store.id)} disabled={!!busy}>
-            {busy === `replace-${store.id}` ? "Импортирую… (до пары минут)" : `Импортировать «${store.title}»`}
-          </PrimaryButton>
-        ),
-      )}
-    </section>
-  );
-
   return (
-    <Sheet title="Импорт из таблиц" onClose={onClose}>
-      <p className="text-sm leading-relaxed text-muted">
-        Связь в одну сторону: таблица → админка и сайт. Правки из админки в таблицу не записываются.
-      </p>
-
-      {hasData ? (
-        <>
-          {newSection}
-          {replaceSection}
-        </>
-      ) : (
-        replaceSection
-      )}
+    <Sheet title="Таблицы и импорт" onClose={onClose}>
+      {data.stores.map((store) => {
+        const fromSheet = data.sources[store.id] === "sheet";
+        return (
+          <section key={store.id} className="space-y-2 rounded-2xl border border-line-strong p-3">
+            <h3 className="font-wide text-base font-semibold">{store.title}</h3>
+            {fromSheet ? (
+              <>
+                <p className="text-sm leading-relaxed text-ink/80">
+                  <b>Сейчас: от Google Таблицы.</b> Новые товары и изменения из таблицы появляются на сайте сами. В админке —
+                  быстрые правки наличия и цен поверх таблицы.
+                </p>
+                <SecondaryButton onClick={() => moveToAdmin(store.id)} disabled={!!busy}>
+                  {busy === `replace-${store.id}` ? "Переношу… (до пары минут)" : "Перенести точку в админку"}
+                </SecondaryButton>
+                {inDb(store.id) && data.schemaReady && (
+                  <button
+                    type="button"
+                    onClick={() => onSwitch("db", store.id)}
+                    disabled={!!busy}
+                    className="w-full text-center text-[13px] font-semibold text-muted underline underline-offset-2"
+                  >
+                    Переключить на уже перенесённые данные (без импорта)
+                  </button>
+                )}
+              </>
+            ) : (
+              <>
+                <p className="text-sm leading-relaxed text-ink/80">
+                  <b>Сейчас: от админки.</b> Таблица на сайт не влияет. Вписали новинку в таблицу — добавьте её кнопкой ниже:
+                  добавится только новое, цены и наличие остальных не изменятся.
+                </p>
+                <PrimaryButton onClick={() => run(`new-${store.id}`, { source: "sheets", storeId: store.id, mode: "new" })} disabled={!!busy}>
+                  {busy === `new-${store.id}` ? "Ищу новые товары…" : "Добавить новые из таблицы"}
+                </PrimaryButton>
+                <SecondaryButton onClick={() => replaceFromSheet(store.id)} disabled={!!busy}>
+                  {busy === `replace-${store.id}` ? "Импортирую… (до пары минут)" : "Заменить всё из таблицы"}
+                </SecondaryButton>
+                {data.schemaReady && (
+                  <button
+                    type="button"
+                    onClick={() => onSwitch("sheet", store.id)}
+                    disabled={!!busy}
+                    className="w-full text-center text-[13px] font-semibold text-muted underline underline-offset-2"
+                  >
+                    Вернуть точку на Google Таблицу
+                  </button>
+                )}
+              </>
+            )}
+          </section>
+        );
+      })}
 
       <p className="text-xs leading-relaxed text-muted">
-        Таблица должна быть открыта по ссылке. Если доступ закрыт — используйте импорт из CSV ниже.
+        Правки из админки в саму таблицу не записываются. Таблица должна быть открыта по ссылке; если доступ закрыт —
+        перенесите листы через CSV ниже.
       </p>
 
       <section className="space-y-3 rounded-2xl border border-line p-3">
         <h3 className="font-wide text-base font-semibold">Из CSV одного листа</h3>
         <p className="text-xs leading-relaxed text-muted">
-          В таблице откройте лист → Файл → Скачать → CSV. Фото в CSV не попадают — их можно добавить в админке.
+          В таблице откройте лист → Файл → Скачать → CSV. Фото в CSV не попадают — их можно добавить в админке. Точка
+          переходит на админку только кнопкой «Перенести точку в админку» или «Переключить…».
         </p>
-        {hasData && (
+        {data.lines.length > 0 && (
           <div role="radiogroup" aria-label="Что сделать" className="grid grid-cols-2 gap-1 rounded-full border border-line p-1">
             {(
               [

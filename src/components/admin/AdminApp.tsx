@@ -19,7 +19,10 @@ import {
   patchStock,
   removeItem,
   removeLine,
+  resetSheetStock,
+  patchSheetStock,
   sortItems,
+  viewData,
   type AdminData,
   type Filters,
   type ItemView,
@@ -208,10 +211,17 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
   );
 
   const storeId = filters.storeId;
+  const sheetMode = data?.sources[storeId] === "sheet";
   const actions = useMemo<AdminActions>(
     () => ({
       setStock: (itemIds, patch) =>
-        optimistic(
+        sheetMode
+          ? optimistic(
+              (d) => patchSheetStock(d, storeId, itemIds, patch),
+              () => api("/api/admin/overrides", { method: "PATCH", body: { storeId, updates: itemIds.map((itemId) => ({ itemId, ...patch })) } }),
+              itemIds.length > 1 ? `Готово: ${itemIds.length} ${pluralize(itemIds.length, ["позиция", "позиции", "позиций"])}` : undefined,
+            )
+          : optimistic(
           (d) =>
             patchStock(d, storeId, itemIds, {
               ...(patch.inStock !== undefined && { in_stock: patch.inStock }),
@@ -271,13 +281,20 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           () => api("/api/admin/sort", { body: lineIds?.length === 1 ? { lineId: lineIds[0] } : {} }),
           "Вкусы расставлены по алфавиту",
         ),
+      resetOverrides: (itemIds) =>
+        optimistic(
+          (d) => resetSheetStock(d, storeId, itemIds),
+          () => api("/api/admin/overrides", { method: "DELETE", body: { storeId, ...(itemIds && { itemIds }) } }),
+          "Как в таблице",
+        ),
     }),
-    [optimistic, storeId],
+    [optimistic, storeId, sheetMode],
   );
 
+  const shown = useMemo(() => (data ? viewData(data, storeId) : null), [data, storeId]);
   const view = useMemo(
-    () => (data ? buildView(data, { ...filters, query: deferredQuery }) : []),
-    [data, filters, deferredQuery],
+    () => (shown ? buildView(shown, { ...filters, query: deferredQuery }) : []),
+    [shown, filters, deferredQuery],
   );
 
   if (loadError && !data)
@@ -289,15 +306,39 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         </button>
       </Notice>
     );
-  if (!data) return <Splash text="Загружаю каталог…" />;
+  if (!data || !shown) return <Splash text="Загружаю каталог…" />;
 
   const store = data.stores.find((s) => s.id === storeId) ?? data.stores[0];
   const visibleItems = view.flatMap((v) => v.visible);
   const expandAll = deferredQuery.trim().length > 0 || filters.status !== "all" || !!filters.brand;
-  const empty = data.lines.length === 0;
+  const empty = shown.lines.length === 0;
+  const sheetError = sheetMode ? data.sheetErrors[storeId] : undefined;
+  const overrides = sheetMode ? (data.sheets[storeId]?.overrides ?? 0) : 0;
+
+  const switchSource = async (source: "sheet" | "db", target = storeId) => {
+    const title = data.stores.find((s) => s.id === target)?.title ?? target;
+    const text =
+      source === "sheet"
+        ? `Вернуть «${title}» на Google Таблицу? Сайт снова будет брать товары из таблицы. Данные в админке сохранятся.`
+        : `Перевести «${title}» на админку? Сайт будет брать товары только из админки, правки в таблице перестанут влиять.`;
+    if (!window.confirm(text)) return;
+    try {
+      await api("/api/admin/settings", { method: "PUT", body: { storeId: target, source } });
+      notify(source === "sheet" ? "Точка работает от таблицы" : "Точка работает от админки");
+      await load();
+    } catch (e) {
+      handleError(e);
+    }
+  };
 
   const setFilter = <K extends keyof Filters>(key: K, value: Filters[K]) => {
-    setFilters((f) => ({ ...f, [key]: value, ...(key === "categoryId" && { brand: "" }) }));
+    setFilters((f) => ({
+      ...f,
+      [key]: value,
+      ...(key === "categoryId" && { brand: "" }),
+      // У точек может быть разный набор категорий (таблица / админка) — фильтры начинаем заново.
+      ...(key === "storeId" && { categoryId: "", brand: "" }),
+    }));
     if (key === "storeId") {
       try {
         window.localStorage.setItem(STORE_KEY, String(value));
@@ -342,9 +383,13 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           </div>
           <Menu
             onImport={() => setOpen({ kind: "import" })}
-            onSortAll={() => {
-              if (window.confirm("Расставить вкусы по алфавиту во всех линейках? Порядок на сайте тоже поменяется.")) void actions.sortLines();
-            }}
+            onSortAll={
+              sheetMode
+                ? undefined
+                : () => {
+                    if (window.confirm("Расставить вкусы по алфавиту во всех линейках? Порядок на сайте тоже поменяется.")) void actions.sortLines();
+                  }
+            }
             onLogout={async () => { await api("/api/admin/session", { method: "DELETE" }); onLoggedOut(); }} />
         </div>
 
@@ -372,7 +417,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         </div>
 
         <div className="no-scrollbar -mx-4 flex gap-1.5 overflow-x-auto px-4">
-          {[{ id: "", title: "Все" }, ...data.categories].map((c) => (
+          {[{ id: "", title: "Все" }, ...shown.categories].map((c) => (
             <button
               key={c.id || "all"}
               type="button"
@@ -394,7 +439,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3 text-sm outline-none"
           >
             <option value="">Все бренды</option>
-            {brandsOf(data, filters.categoryId).map((b) => (
+            {brandsOf(shown, filters.categoryId).map((b) => (
               <option key={b} value={b}>
                 {b}
               </option>
@@ -413,6 +458,47 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         </div>
       </div>
 
+      {/* Откуда точка берёт товары */}
+      {!data.schemaReady && (
+        <p className="mx-4 mt-3 rounded-2xl border border-danger/50 p-3 text-sm leading-relaxed text-ink/90">
+          Чтобы заработали правки поверх таблицы, обновите базу: Supabase → SQL Editor → вставьте новый{" "}
+          <b>supabase/schema.sql</b> → Run.
+        </p>
+      )}
+      {sheetMode ? (
+        <div className="mx-4 mt-3 space-y-2 rounded-2xl border border-line-strong p-3 text-sm leading-relaxed">
+          <p>
+            <b>«{store.title}» работает от Google Таблицы.</b> Новые товары, названия и фото — из таблицы. Здесь —
+            быстрые правки наличия и цен: они действуют, пока ту же клетку не поменяют в таблице.
+          </p>
+          {overrides > 0 && (
+            <div className="flex items-center gap-2">
+              <span className="flex-1 text-muted">
+                Правок поверх таблицы: <b className="text-ink">{overrides}</b>
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm(`Убрать все правки и показать «${store.title}» точно как в таблице?`)) void actions.resetOverrides?.();
+                }}
+                className="h-9 rounded-full border border-line-strong px-3 text-[13px] font-bold active:scale-95"
+              >
+                Всё как в таблице
+              </button>
+            </div>
+          )}
+        </div>
+      ) : (
+        data.schemaReady && (
+          <p className="mx-4 mt-3 text-[13px] text-muted">
+            «{store.title}» работает от админки.{" "}
+            <button type="button" onClick={() => switchSource("sheet")} className="font-semibold underline underline-offset-2">
+              Вернуть на таблицу
+            </button>
+          </p>
+        )
+      )}
+
       {/* Сводка и массовые действия по показанным позициям */}
       {!empty && (
         <div className="flex items-center gap-2 px-4 py-3">
@@ -428,7 +514,9 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         </div>
       )}
 
-      {empty ? (
+      {sheetError ? (
+        <p className="mx-4 mt-6 rounded-2xl border border-danger/50 p-4 text-sm text-danger">{sheetError}</p>
+      ) : empty ? (
         <div className="mx-4 mt-6 space-y-4 rounded-[26px] border border-dashed border-line-strong p-6 text-center">
           <p className="font-wide text-lg font-semibold">База пока пустая</p>
           <p className="text-sm text-muted">Перенесите ассортимент из Google Таблиц одной кнопкой — линейки, вкусы, цены, наличие и фото.</p>
@@ -442,6 +530,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             <LineBlock
               key={v.line.id}
               view={v}
+              sheetMode={sheetMode}
               forceOpen={expandAll}
               actions={actions}
               onEditLine={() => setOpen({ kind: "line", lineId: v.line.id })}
@@ -452,7 +541,8 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         </ul>
       )}
 
-      {/* Добавить */}
+      {/* Добавить (в режиме таблицы новые товары добавляются в таблицу) */}
+      {!sheetMode && (
       <button
         type="button"
         onClick={() => setOpen({ kind: "add" })}
@@ -461,6 +551,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
       >
         <PlusIcon width={28} height={28} />
       </button>
+      )}
 
       {toast && (
         <div
@@ -500,14 +591,16 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           }}
         />
       )}
-      {openLine && <LineSheet view={openLine} data={data} storeTitle={store.title} actions={actions} onClose={() => setOpen(null)} />}
+      {openLine && (
+        <LineSheet view={openLine} data={data} storeTitle={store.title} sheetMode={sheetMode} actions={actions} onClose={() => setOpen(null)} />
+      )}
       {openItem && <ItemSheet item={openItem} data={data} actions={actions} onClose={() => setOpen(null)} />}
-      {open?.kind === "import" && <ImportSheet data={data} onClose={() => setOpen(null)} onDone={load} />}
+      {open?.kind === "import" && <ImportSheet data={data} onClose={() => setOpen(null)} onDone={load} onSwitch={switchSource} />}
     </div>
   );
 }
 
-function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortAll: () => void; onLogout: () => void }) {
+function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortAll?: () => void; onLogout: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -525,11 +618,13 @@ function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortA
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} aria-hidden />
           <div className="animate-fade-in absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-2xl border border-line bg-raised shadow-xl">
             <button type="button" onClick={() => { setOpen(false); onImport(); }} className="block w-full px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
-              Импорт из таблиц
+              Таблицы и импорт
             </button>
-            <button type="button" onClick={() => { setOpen(false); onSortAll(); }} className="block w-full border-t border-line px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
-              Все вкусы по алфавиту
-            </button>
+            {onSortAll && (
+              <button type="button" onClick={() => { setOpen(false); onSortAll(); }} className="block w-full border-t border-line px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
+                Все вкусы по алфавиту
+              </button>
+            )}
             <a href="/" target="_blank" rel="noopener" className="block border-t border-line px-4 py-3 text-sm font-semibold active:bg-white/10">
               Открыть сайт
             </a>
@@ -547,6 +642,7 @@ function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortA
 
 function LineBlock({
   view,
+  sheetMode,
   forceOpen,
   actions,
   onEditLine,
@@ -554,6 +650,7 @@ function LineBlock({
   onAddItem,
 }: {
   view: LineView;
+  sheetMode: boolean;
   forceOpen: boolean;
   actions: AdminActions;
   onEditLine: () => void;
@@ -601,37 +698,76 @@ function LineBlock({
         <div className="border-t border-line">
           <ul>
             {view.visible.map((v) => (
-              <ItemRow key={v.item.id} view={v} linePrice={view.price} actions={actions} onEdit={() => onEditItem(v.item.id)} />
+              <ItemRow key={v.item.id} view={v} linePrice={view.price} sheetMode={sheetMode} actions={actions} onEdit={() => onEditItem(v.item.id)} />
             ))}
           </ul>
-          <button type="button" onClick={onAddItem} className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-sm font-bold text-ink/85 active:bg-white/5">
-            <PlusIcon width={16} height={16} /> Добавить вкус
-          </button>
+          {!sheetMode && (
+            <button type="button" onClick={onAddItem} className="flex h-11 w-full items-center justify-center gap-1.5 border-t border-line text-sm font-bold text-ink/85 active:bg-white/5">
+              <PlusIcon width={16} height={16} /> Добавить вкус
+            </button>
+          )}
         </div>
       )}
     </li>
   );
 }
 
-function ItemRow({ view, linePrice, actions, onEdit }: { view: ItemView; linePrice: number | null; actions: AdminActions; onEdit: () => void }) {
+function ItemRow({
+  view,
+  linePrice,
+  sheetMode,
+  actions,
+  onEdit,
+}: {
+  view: ItemView;
+  linePrice: number | null;
+  sheetMode: boolean;
+  actions: AdminActions;
+  onEdit: () => void;
+}) {
   const { item, stock, price } = view;
+  const sheet = stock.sheet;
+  const overridden = !!sheet && (sheet.stockOverridden || sheet.priceOverridden);
   return (
     <li className="flex items-center gap-2 border-t border-line py-1 pl-3 pr-1 first:border-t-0">
       <div className={`min-w-0 flex-1 py-1.5 ${stock.in_stock ? "" : "opacity-50"}`}>
-        <InlineText
-          value={item.title}
-          label="Название"
-          onSave={(title) => actions.updateItem(item.id, { title })}
-          className="block w-full text-left text-[15px] font-semibold leading-snug [overflow-wrap:anywhere]"
-        />
+        {sheetMode ? (
+          <p className="text-[15px] font-semibold leading-snug [overflow-wrap:anywhere]">{item.title}</p>
+        ) : (
+          <InlineText
+            value={item.title}
+            label="Название"
+            onSave={(title) => actions.updateItem(item.id, { title })}
+            className="block w-full text-left text-[15px] font-semibold leading-snug [overflow-wrap:anywhere]"
+          />
+        )}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted">
           {item.variant && <span>{item.variant}</span>}
           <InlinePrice value={price} highlight={price !== linePrice} onSave={(p) => actions.setStock([item.id], { price: p })} />
+          {overridden && (
+            <span className="text-ink/80">
+              · в таблице: {[sheet.stockOverridden && (sheet.inStock ? "есть" : "нет"), sheet.priceOverridden && formatPrice(sheet.price)].filter(Boolean).join(", ")}
+            </span>
+          )}
         </div>
       </div>
-      <button type="button" onClick={onEdit} aria-label={`Ещё: ${item.title}`} className="flex size-10 shrink-0 items-center justify-center text-lg font-bold text-muted">
-        ⋯
-      </button>
+      {sheetMode ? (
+        overridden && (
+          <button
+            type="button"
+            onClick={() => void actions.resetOverrides?.([item.id])}
+            aria-label={`Как в таблице: ${item.title}`}
+            title="Как в таблице"
+            className="flex size-10 shrink-0 items-center justify-center text-lg font-bold text-ink/80"
+          >
+            ↺
+          </button>
+        )
+      ) : (
+        <button type="button" onClick={onEdit} aria-label={`Ещё: ${item.title}`} className="flex size-10 shrink-0 items-center justify-center text-lg font-bold text-muted">
+          ⋯
+        </button>
+      )}
       <Toggle
         checked={stock.in_stock}
         onChange={(inStock) => void actions.setStock([item.id], { inStock })}

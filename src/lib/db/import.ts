@@ -34,6 +34,8 @@ export interface ImportReport {
   /** addedToStore — сколько позиций получили наличие/цену в этой точке. */
   items: { total: number; created: number; addedToStore: number };
   photos: { copied: number; failed: number };
+  /** Точка переведена на админку (полный перенос из таблицы). */
+  switched?: boolean;
 }
 
 const norm = (text: string | null | undefined) => (text ?? "").toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();

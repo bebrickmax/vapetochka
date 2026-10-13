@@ -8,7 +8,9 @@ import { uniqueKeys } from "@/lib/products";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
 import { catalogFromSnapshot, loadSnapshot } from "@/lib/db/catalog";
+import { cleanupOverrides, loadOverrides, loadStoreSources } from "@/lib/db/overrides";
 import { isDbConfigured } from "@/lib/db/supabase";
+import { applyOverrides } from "@/lib/overrides";
 import { fetchStoreSheets, fetchWholesaleSheet, type StoreSheets } from "@/lib/sheets/sources";
 import { parseWholesaleSheet } from "@/lib/sheets/wholesale";
 import type { Catalog, CatalogSource, Category, ProductGroup, RawSheet, Wholesale } from "@/lib/types";
@@ -68,29 +70,71 @@ async function loadDbCatalog(store: Store): Promise<Catalog | null> {
   return wholesale ? { ...catalog, wholesale } : catalog;
 }
 
+const cacheProfile = {
+  stale: cacheConfig.revalidateSeconds,
+  revalidate: cacheConfig.revalidateSeconds,
+  expire: 60 * 60 * 24 * 7,
+};
+
 /**
- * Каталог точки с кэшем: страница отдаётся мгновенно из кэша, а раз в
- * `revalidateSeconds` данные перечитываются в фоне. Любое изменение в админке
- * (и /api/revalidate) сбрасывает кэш сразу — следующий запрос получит свежие данные.
+ * Каталог точки ровно как в Google Таблице (без правок из админки). Кэшируется
+ * отдельно: правка наличия в админке не заставляет заново скачивать таблицу.
  */
-export async function getCatalog(storeId: string): Promise<Catalog> {
+export async function getSheetCatalog(storeId: string): Promise<Catalog> {
   "use cache";
-  cacheTag(cacheConfig.tag);
-  cacheLife({
-    stale: cacheConfig.revalidateSeconds,
-    revalidate: cacheConfig.revalidateSeconds,
-    expire: 60 * 60 * 24 * 7,
-  });
+  cacheTag(cacheConfig.sheetsTag);
+  cacheLife(cacheProfile);
 
   const store = getStore(storeId);
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
-
-  // Каталог из базы (админка). Пока база не подключена или пуста — из Google Таблиц.
-  const fromDb = await loadDbCatalog(store);
-  if (fromDb) return fromDb;
-
   const { sheets, wholesale: wholesaleSheet, source } = await loadSheets(store);
   const catalog = buildCatalog(sheets, source, store.id);
   const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet, store.id) : undefined;
   return wholesale ? { ...catalog, wholesale } : catalog;
+}
+
+/** Таблица + быстрые правки из админки. Ошибка базы не ломает витрину — тогда просто таблица. */
+async function withOverrides(catalog: Catalog): Promise<Catalog> {
+  try {
+    const overrides = await loadOverrides(catalog.storeId);
+    if (!overrides?.length) return catalog;
+    const { groups, cleanup } = applyOverrides(catalog.groups, overrides);
+    if (cleanup.remove.length || cleanup.update.length) {
+      await cleanupOverrides(catalog.storeId, cleanup).catch((e) => console.error("[catalog] Не удалось убрать устаревшие правки:", e));
+    }
+    return { ...catalog, groups };
+  } catch (error) {
+    console.error("[catalog] Правки из админки недоступны, показываю таблицу:", error);
+    return catalog;
+  }
+}
+
+/**
+ * Каталог точки с кэшем: страница отдаётся мгновенно из кэша, а раз в
+ * `revalidateSeconds` данные перечитываются в фоне. Любое изменение в админке
+ * (и /api/revalidate) сбрасывает кэш сразу — следующий запрос получит свежие данные.
+ *
+ * Откуда берутся товары, решает настройка точки в админке:
+ *   «таблица» — Google Таблица + быстрые правки наличия и цен из админки;
+ *   «админка» — только база.
+ */
+export async function getCatalog(storeId: string): Promise<Catalog> {
+  "use cache";
+  cacheTag(cacheConfig.tag);
+  cacheLife(cacheProfile);
+
+  const store = getStore(storeId);
+  if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
+  if (!isDbConfigured() || process.env.CATALOG_SOURCE === "demo") return getSheetCatalog(store.id);
+
+  const sources = await loadStoreSources();
+  if (sources === null) {
+    // База без таблицы настроек (schema.sql ещё не обновлён) — как раньше: база, если в ней есть товары точки.
+    return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
+  }
+  if (sources[store.id] === "db") {
+    const fromDb = await loadDbCatalog(store);
+    if (fromDb) return fromDb;
+  }
+  return withOverrides(await getSheetCatalog(store.id));
 }
