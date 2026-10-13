@@ -47,6 +47,18 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
       (l) => l.category_id === categoryId && norm(l.name) === norm(lineName) && norm(l.brand ?? "") === norm(brand),
     );
 
+  // Цена по умолчанию — самая частая цена линейки в этой точке (если поле оставить пустым).
+  const suggestedPrice = useMemo(() => {
+    if (!existing) return null;
+    const ids = new Set(data.items.filter((i) => i.line_id === existing.id).map((i) => i.id));
+    const counts = new Map<number, number>();
+    for (const s of data.stock) {
+      const p = s.price === null ? null : Number(s.price);
+      if (s.store_id === storeId && ids.has(s.item_id) && p !== null && Number.isFinite(p)) counts.set(p, (counts.get(p) ?? 0) + 1);
+    }
+    return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
+  }, [existing, data.items, data.stock, storeId]);
+
   const flavorList = titles
     .split("\n")
     .map((t) => t.trim())
@@ -67,12 +79,12 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
           ...body,
           titles: flavorList,
           variant: variant.trim() || undefined,
-          price: price.trim() || null,
+          price: price.trim() || suggestedPrice,
           stores,
           inStock,
         },
       });
-      const p = price.trim() ? Number(price.replace(",", ".")) : null;
+      const p = price.trim() ? Number(price.replace(",", ".")) : suggestedPrice;
       onCreated({ ...result, stores, price: p, inStock });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сохранить");
@@ -138,7 +150,7 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
 
       <div className="grid grid-cols-2 gap-3">
         <Field label="Цена, BYN">
-          <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="15" className={inputClass} />
+          <input inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={suggestedPrice !== null ? `${suggestedPrice} — как у линейки` : "15"} className={inputClass} />
         </Field>
         <Field label="Вариант" hint="Сопротивление, объём">
           <input value={variant} onChange={(e) => setVariant(e.target.value)} placeholder="0.6 Ом" className={inputClass} />
