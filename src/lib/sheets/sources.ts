@@ -113,26 +113,40 @@ export interface StoreSheets {
   wholesale?: RawSheet;
 }
 
+async function loadWholesaleTab(store: Store, tab: SheetTab | undefined): Promise<RawSheet | undefined> {
+  if (!tab) return undefined;
+  try {
+    const [rows] = await fetchRows(store, [tab]);
+    return await withImages(store, tab, rows);
+  } catch (error) {
+    // Раздел ОПТ необязательный: без него каталог всё равно должен работать.
+    console.warn(`[catalog] Лист «${tab.title}» («${store.title}») недоступен:`, error);
+    return undefined;
+  }
+}
+
+const findWholesaleTab = (tabs: SheetTab[]) => {
+  const title = sheetsConfig.wholesaleSheet.trim();
+  return title ? tabs.find((t) => sameTitle(t.title, title)) : undefined;
+};
+
+/** Только лист «ОПТ» (когда каталог уже берётся из базы). Ошибки не пробрасывает. */
+export async function fetchWholesaleSheet(store: Store): Promise<RawSheet | undefined> {
+  try {
+    return await loadWholesaleTab(store, findWholesaleTab(await listTabs(store)));
+  } catch (error) {
+    console.warn(`[catalog] ОПТ «${store.title}» недоступен:`, error);
+    return undefined;
+  }
+}
+
 /** Все данные таблицы точки: листы каталога с фото и лист «ОПТ». */
 export async function fetchStoreSheets(store: Store): Promise<StoreSheets> {
   const tabs = await listTabs(store);
-  const wholesaleTitle = sheetsConfig.wholesaleSheet.trim();
-  const wholesaleTab = wholesaleTitle ? tabs.find((t) => sameTitle(t.title, wholesaleTitle)) : undefined;
+  const wholesaleTab = findWholesaleTab(tabs);
   const catalogTabs = tabs.filter((t) => !isExcluded(t.title) && t !== wholesaleTab);
 
-  const loadWholesale = async (): Promise<RawSheet | undefined> => {
-    if (!wholesaleTab) return undefined;
-    try {
-      const [rows] = await fetchRows(store, [wholesaleTab]);
-      return await withImages(store, wholesaleTab, rows);
-    } catch (error) {
-      // Раздел ОПТ необязательный: без него каталог всё равно должен работать.
-      console.warn(`[catalog] Лист «${wholesaleTab.title}» («${store.title}») недоступен:`, error);
-      return undefined;
-    }
-  };
-
-  const [rows, wholesale] = await Promise.all([fetchRows(store, catalogTabs), loadWholesale()]);
+  const [rows, wholesale] = await Promise.all([fetchRows(store, catalogTabs), loadWholesaleTab(store, wholesaleTab)]);
   const sheets = await Promise.all(catalogTabs.map((tab, i) => withImages(store, tab, rows[i])));
   return { sheets, ...(wholesale && { wholesale }) };
 }

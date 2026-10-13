@@ -48,7 +48,7 @@ export interface Category {
   sheetTitle: string;
 }
 
-export type CatalogSource = "api" | "csv" | "demo";
+export type CatalogSource = "api" | "csv" | "demo" | "db";
 
 /** Позиция оптового прайса: до четырёх цен по количеству (от 10, 30, 50, 100 шт). */
 export interface WholesaleItem {
