@@ -106,4 +106,33 @@ describe("import", () => {
     const names = catalogFromSnapshot(db.snapshot(), "main").groups[0].items.map((i) => i.name);
     expect(names).toEqual(["Абрикос", "Арбуз", "Банан", "Вишня"]);
   });
+
+  it("only-new mode adds new flavors and keeps prices and stock edited in the admin", async () => {
+    const db = fakeSupabase();
+    const table = (rows: string[][]) => categoriesFromSheets([sheet("Жидкости", rows)]);
+    await importCategories("main", table([["Рик 50mg"], ["15 BYN"], ["", "🍌Банан", "✅"], ["", "🍉Арбуз", "✅"]]));
+    // В админке: Банан закончился, цена Арбуза — 17.
+    const snap = db.snapshot();
+    const id = (name: string) => snap.items.find((i) => i.title.includes(name))!.id;
+    snap.stock.find((s) => s.item_id === id("Банан"))!.in_stock = false;
+    snap.stock.find((s) => s.item_id === id("Арбуз"))!.price = 17;
+
+    // В таблице: новый вкус и новая линейка, у старых — прежние значения.
+    const report = await importCategories(
+      "main",
+      table([["Рик 50mg"], ["15 BYN"], ["", "🍌Банан", "✅"], ["", "🍉Арбуз", "✅"], ["", "🥭Абрикос", "✅"], ["Skala 20mg"], ["12 BYN"], ["", "Мята", "✅"]]),
+      { mode: "new" },
+    );
+    expect(report).toMatchObject({ mode: "new", lines: { created: 1 }, items: { created: 2, addedToStore: 2 } });
+
+    const groups = catalogFromSnapshot(db.snapshot(), "main").groups;
+    expect(groups.map((g) => [g.line, g.items.map((i) => `${i.name}:${i.price}:${i.status}`)])).toEqual([
+      ["Рик 50mg", ["Абрикос:15:in", "Арбуз:17:in", "Банан:15:out"]],
+      ["Skala 20mg", ["Мята:12:in"]],
+    ]);
+
+    // Второй раз — ничего нового.
+    const again = await importCategories("main", table([["Рик 50mg"], ["15 BYN"], ["", "🍌Банан", "✅"]]), { mode: "new" });
+    expect(again).toMatchObject({ lines: { created: 0 }, items: { created: 0, addedToStore: 0 } });
+  });
 });

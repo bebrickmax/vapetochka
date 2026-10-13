@@ -6,6 +6,7 @@ import { categoryFromSheet, slugify } from "@/lib/sheets/categories";
 import { parseSheet, type ParsedGroup } from "@/lib/sheets/parse";
 import { fetchStoreSheets } from "@/lib/sheets/sources";
 import type { ProductItem, RawSheet } from "@/lib/types";
+import { sortLines } from "@/lib/admin/mutations";
 import { loadSnapshot } from "./catalog";
 import { inList, insert, remove, uploadPhoto } from "./supabase";
 import type { DbCategory, DbItem, DbLine, DbStock } from "./types";
@@ -27,9 +28,11 @@ export interface ImportCategory {
 
 export interface ImportReport {
   storeId: string;
+  mode: "replace" | "new";
   categories: number;
   lines: { total: number; created: number };
-  items: { total: number; created: number };
+  /** addedToStore — сколько позиций получили наличие/цену в этой точке. */
+  items: { total: number; created: number; addedToStore: number };
   photos: { copied: number; failed: number };
 }
 
@@ -116,12 +119,23 @@ async function insertBatched<T>(table: string, rows: object[]): Promise<T[]> {
   return out;
 }
 
+export interface ImportOptions {
+  /** Копировать фото из Google Таблицы в хранилище. */
+  copyPhotos?: boolean;
+  /**
+   * "replace" — наличие и цены точки в импортируемых категориях заменяются таблицей (полный перенос).
+   * "new" — добавляются только новые линейки и позиции; цены и наличие уже существующих не трогаются.
+   */
+  mode?: "replace" | "new";
+}
+
 export async function importCategories(
   storeId: string,
   categories: ImportCategory[],
-  options: { copyPhotos?: boolean } = {},
+  options: ImportOptions = {},
 ): Promise<ImportReport> {
   if (!getStore(storeId)) throw new Error(`Неизвестная точка: ${storeId}`);
+  const onlyNew = options.mode === "new";
   const snapshot = await loadSnapshot();
 
   // 1. Категории (существующие не трогаем).
@@ -131,21 +145,12 @@ export async function importCategories(
     .map<DbCategory>(({ id, title, sort }) => ({ id, title, sort }));
   if (newCategories.length) await insert("categories", newCategories, { onConflict: "id", ignoreDuplicates: true });
 
-  // 2. Фото: копируем в хранилище, чтобы не зависеть от доступа к таблице.
-  const photoUrls = options.copyPhotos
-    ? categories.flatMap((c) => c.groups.flatMap((g) => [g.image, ...g.items.map((i) => i.image)])).filter(
-        (u): u is string => !!u,
-      )
-    : [];
-  const photos = photoUrls.length ? await copyPhotos(photoUrls) : { map: new Map<string, string>(), failed: 0 };
-  const photo = (url: string | undefined) => (url ? (photos.map.get(url) ?? (options.copyPhotos ? null : url)) : null);
-
-  // 3. Линейки: находим существующие по категории + разделу + бренду + названию.
+  // 2. План линеек: находим существующие по категории + разделу + бренду + названию.
   const linesByKey = new Map(snapshot.lines.map((l) => [lineKey(l.category_id, l), l]));
   const maxSort = new Map<string, number>();
   for (const l of snapshot.lines) maxSort.set(l.category_id, Math.max(maxSort.get(l.category_id) ?? 0, l.sort));
 
-  const plan: { line: DbLine | null; key: string; row: Omit<DbLine, "id">; group: ParsedGroup }[] = [];
+  const plan: { key: string; row: Omit<DbLine, "id">; group: ParsedGroup }[] = [];
   for (const category of categories) {
     const families = assignFamilies(category.groups);
     category.groups.forEach((group, index) => {
@@ -156,21 +161,40 @@ export async function importCategories(
         section: group.section ?? null,
         name: group.line,
         note: group.note ?? null,
-        image_url: photo(group.image),
+        image_url: group.image ?? null, // пока исходная ссылка — заменим после копирования
         sort: (maxSort.get(category.id) ?? 0) + (index + 1) * 10,
       };
-      const key = lineKey(category.id, row);
-      plan.push({ line: linesByKey.get(key) ?? null, key, row, group });
+      plan.push({ key: lineKey(category.id, row), row, group });
     });
   }
 
+  // 3. Что новое: линейки, которых нет в базе, и позиции, которых нет в своей линейке.
+  const itemsByKey = new Map(snapshot.items.map((i) => [itemKey(i.line_id, i.title, i.variant), i]));
+  const isNewItem = (p: (typeof plan)[number], title: string, variant: string | undefined) => {
+    const line = linesByKey.get(p.key);
+    return !line || !itemsByKey.has(itemKey(line.id, title, variant));
+  };
+
+  // 4. Фото копируем только для того, что будет создано: у существующих линеек и позиций фото не меняются.
+  const photoUrls: string[] = [];
+  if (options.copyPhotos) {
+    for (const p of plan) {
+      if (!linesByKey.has(p.key) && p.group.image) photoUrls.push(p.group.image);
+      for (const item of p.group.items) {
+        if (item.image && item.image !== p.group.image && isNewItem(p, itemTitle(item), item.variant)) photoUrls.push(item.image);
+      }
+    }
+  }
+  const photos = photoUrls.length ? await copyPhotos(photoUrls) : { map: new Map<string, string>(), failed: 0 };
+  const photo = (url: string | null | undefined) => (url ? (photos.map.get(url) ?? (options.copyPhotos ? null : url)) : null);
+
+  // 5. Новые линейки.
   const toCreate = new Map<string, Omit<DbLine, "id">>();
-  for (const p of plan) if (!p.line && !toCreate.has(p.key)) toCreate.set(p.key, p.row);
+  for (const p of plan) if (!linesByKey.has(p.key) && !toCreate.has(p.key)) toCreate.set(p.key, { ...p.row, image_url: photo(p.row.image_url) });
   const createdLines = await insertBatched<DbLine>("product_lines", [...toCreate.values()]);
   for (const line of createdLines) linesByKey.set(lineKey(line.category_id, line), line);
 
-  // 4. Позиции.
-  const itemsByKey = new Map(snapshot.items.map((i) => [itemKey(i.line_id, i.title, i.variant), i]));
+  // 6. Новые позиции.
   const itemPlan: { key: string; row: Omit<DbItem, "id">; item: ProductItem }[] = [];
   for (const p of plan) {
     const line = linesByKey.get(p.key)!;
@@ -194,7 +218,7 @@ export async function importCategories(
   const createdItems = await insertBatched<DbItem>("items", [...itemsToCreate.values()]);
   for (const item of createdItems) itemsByKey.set(itemKey(item.line_id, item.title, item.variant), item);
 
-  // 5. Наличие и цены точки в импортируемых категориях: заменяем целиком (другие категории не трогаем).
+  // 7. Наличие и цены точки.
   const stockRows = new Map<string, DbStock>();
   for (const p of itemPlan) {
     const item = itemsByKey.get(p.key)!;
@@ -206,30 +230,46 @@ export async function importCategories(
       in_stock: p.item.status !== "out",
     });
   }
-  const importedCategories = new Set(categories.map((c) => c.id));
-  const lineCategory = new Map(snapshot.lines.map((l) => [l.id, l.category_id]));
-  const itemCategory = new Map(snapshot.items.map((i) => [i.id, lineCategory.get(i.line_id)]));
-  const existingIds = snapshot.stock
-    .filter((s) => s.store_id === storeId && importedCategories.has(itemCategory.get(s.item_id) ?? ""))
-    .map((s) => s.item_id);
-  for (let i = 0; i < existingIds.length; i += 150) {
-    await remove("item_stock", { store_id: `eq.${storeId}`, item_id: inList(existingIds.slice(i, i + 150)) });
+
+  let addedToStore = 0;
+  if (onlyNew) {
+    // Только то, чего в этой точке ещё нет; существующие цены и наличие остаются как в админке.
+    const present = new Set(snapshot.stock.filter((s) => s.store_id === storeId).map((s) => s.item_id));
+    const missing = [...stockRows.values()].filter((row) => !present.has(row.item_id));
+    await insertBatched("item_stock", missing);
+    addedToStore = missing.length;
+    // Новые вкусы — на свои места по алфавиту, как при добавлении из админки.
+    const touched = [...new Set(createdItems.map((item) => item.line_id))];
+    if (touched.length) await sortLines(touched);
+  } else {
+    // Заменяем наличие точки в импортируемых категориях целиком (другие категории не трогаем).
+    const importedCategories = new Set(categories.map((c) => c.id));
+    const lineCategory = new Map(snapshot.lines.map((l) => [l.id, l.category_id]));
+    const itemCategory = new Map(snapshot.items.map((i) => [i.id, lineCategory.get(i.line_id)]));
+    const existingIds = snapshot.stock
+      .filter((s) => s.store_id === storeId && importedCategories.has(itemCategory.get(s.item_id) ?? ""))
+      .map((s) => s.item_id);
+    for (let i = 0; i < existingIds.length; i += 150) {
+      await remove("item_stock", { store_id: `eq.${storeId}`, item_id: inList(existingIds.slice(i, i + 150)) });
+    }
+    await insertBatched("item_stock", [...stockRows.values()]);
+    addedToStore = stockRows.size;
   }
-  await insertBatched("item_stock", [...stockRows.values()]);
 
   return {
     storeId,
+    mode: onlyNew ? "new" : "replace",
     categories: categories.length,
     lines: { total: plan.length, created: createdLines.length },
-    items: { total: itemPlan.length, created: createdItems.length },
+    items: { total: itemPlan.length, created: createdItems.length, addedToStore },
     photos: { copied: photos.map.size, failed: photos.failed },
   };
 }
 
 /** Импорт точки прямо из её Google Таблицы (данные + фото). */
-export async function importStoreFromSheets(storeId: string): Promise<ImportReport> {
+export async function importStoreFromSheets(storeId: string, mode: ImportOptions["mode"] = "replace"): Promise<ImportReport> {
   const store = getStore(storeId);
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
   const { sheets } = await fetchStoreSheets(store);
-  return importCategories(storeId, categoriesFromSheets(sheets), { copyPhotos: true });
+  return importCategories(storeId, categoriesFromSheets(sheets), { copyPhotos: true, mode });
 }
