@@ -8,7 +8,9 @@ import { uniqueKeys } from "@/lib/products";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
 import { catalogFromSnapshot, loadSnapshot } from "@/lib/db/catalog";
-import { cleanupOverrides, loadOverrides, loadStoreSources } from "@/lib/db/overrides";
+import { cleanupOverrides, loadOverrides } from "@/lib/db/overrides";
+import { loadSettings, sourceOf, syncStore, type SyncResult } from "@/lib/db/sync";
+import type { DbSnapshot } from "@/lib/db/types";
 import { isDbConfigured } from "@/lib/db/supabase";
 import { applyOverrides } from "@/lib/overrides";
 import { fetchStoreSheets, fetchWholesaleSheet, type StoreSheets } from "@/lib/sheets/sources";
@@ -60,12 +62,18 @@ async function loadSheets(store: Store): Promise<StoreSheets & { source: Catalog
   }
 }
 
-async function loadDbCatalog(store: Store): Promise<Catalog | null> {
+/**
+ * Каталог точки из базы. snapshot — уже загруженный снимок, wholesale — уже скачанный лист «ОПТ»
+ * (оптовые цены пока живут в Google Таблице).
+ */
+async function loadDbCatalog(
+  store: Store,
+  ready: { snapshot?: DbSnapshot | null; wholesale?: { sheet?: RawSheet } } = {},
+): Promise<Catalog | null> {
   if (!isDbConfigured() || process.env.CATALOG_SOURCE === "demo") return null;
-  const catalog = catalogFromSnapshot(await loadSnapshot(), store.id);
+  const catalog = catalogFromSnapshot(ready.snapshot ?? (await loadSnapshot()), store.id);
   if (catalog.groups.length === 0) return null; // база ещё не заполнена — работаем от таблиц
-  // Оптовые цены пока остаются в листе «ОПТ» Google Таблицы.
-  const wholesaleSheet = await fetchWholesaleSheet(store);
+  const wholesaleSheet = ready.wholesale ? ready.wholesale.sheet : await fetchWholesaleSheet(store);
   const wholesale = wholesaleSheet ? buildWholesale(wholesaleSheet, store.id) : undefined;
   return wholesale ? { ...catalog, wholesale } : catalog;
 }
@@ -115,8 +123,10 @@ async function withOverrides(catalog: Catalog): Promise<Catalog> {
  * (и /api/revalidate) сбрасывает кэш сразу — следующий запрос получит свежие данные.
  *
  * Откуда берутся товары, решает настройка точки в админке:
- *   «таблица» — Google Таблица + быстрые правки наличия и цен из админки;
- *   «админка» — только база.
+ *   «от таблицы» — база как зеркало Google Таблицы: перед показом подтягиваются изменения
+ *                  таблицы (не чаще раза в 20 секунд), а правки и новинки из админки сохраняются;
+ *   «от админки» — только база, таблица не влияет.
+ * Если база недоступна или ещё не настроена — показываем саму таблицу.
  */
 export async function getCatalog(storeId: string): Promise<Catalog> {
   "use cache";
@@ -127,14 +137,29 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
   if (!isDbConfigured() || process.env.CATALOG_SOURCE === "demo") return getSheetCatalog(store.id);
 
-  const sources = await loadStoreSources();
-  if (sources === null) {
-    // База без таблицы настроек (schema.sql ещё не обновлён) — как раньше: база, если в ней есть товары точки.
-    return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
+  const settings = await loadSettings().catch((error) => {
+    console.error("[catalog] Настройки точек не прочитались:", error);
+    return undefined;
+  });
+  if (settings === undefined) return getSheetCatalog(store.id);
+  // Старая схема без настроек — как раньше: база, если в ней есть товары точки.
+  if (settings === null) return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
+  if (sourceOf(settings, store.id) === "db") return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
+  // Схема без колонок зеркала — таблица + быстрые правки.
+  if (!settings.mirror) return withOverrides(await getSheetCatalog(store.id));
+
+  let synced: SyncResult | null = null;
+  try {
+    synced = await syncStore(store.id, { minIntervalSeconds: 20, maxPhotos: 8 });
+  } catch (error) {
+    console.error(`[catalog] Синхронизация «${store.title}» не удалась, показываю последнюю:`, error);
   }
-  if (sources[store.id] === "db") {
-    const fromDb = await loadDbCatalog(store);
-    if (fromDb) return fromDb;
-  }
-  return withOverrides(await getSheetCatalog(store.id));
+  const fromDb = await loadDbCatalog(store, {
+    snapshot: synced?.snapshot,
+    ...(synced && { wholesale: { sheet: synced.sheets.wholesale } }),
+  }).catch((error) => {
+    console.error("[catalog] База недоступна, показываю таблицу:", error);
+    return null;
+  });
+  return fromDb ?? withOverrides(await getSheetCatalog(store.id));
 }

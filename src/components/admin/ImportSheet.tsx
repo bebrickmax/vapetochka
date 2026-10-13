@@ -1,18 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import type { ImportReport } from "@/lib/db/import";
-import { pluralize } from "@/lib/format";
 import { api } from "./api";
 import type { AdminData } from "./model";
 import { Field, inputClass, PrimaryButton, SecondaryButton, Sheet, StoreChecks } from "./ui";
 
 type Mode = "replace" | "new";
 
+const time = (iso: string | null | undefined) =>
+  iso ? new Date(iso).toLocaleString("ru-RU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : null;
+
 /**
  * Связь с Google Таблицами по точкам:
- *  «от таблицы» — товары берутся из таблицы сами; можно перенести точку в админку;
- *  «от админки» — новые товары из таблицы по кнопке, полная замена, возврат на таблицу.
+ *  «от таблицы» — база синхронизируется с таблицей сама; переход на админку — одной кнопкой;
+ *  «от админки» — таблица не влияет; новинки из таблицы — по кнопке; можно вернуться на таблицу.
  */
 export function ImportSheet({
   data,
@@ -23,7 +24,7 @@ export function ImportSheet({
   data: AdminData;
   onClose: () => void;
   onDone: () => void;
-  onSwitch: (source: "sheet" | "db", storeId: string) => void;
+  onSwitch: (source: "sheet" | "db", storeId: string) => void | Promise<void>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -33,124 +34,128 @@ export function ImportSheet({
   const [csvMode, setCsvMode] = useState<Mode>(data.lines.length > 0 ? "new" : "replace");
 
   const title = (id: string) => data.stores.find((s) => s.id === id)?.title ?? id;
-  const inDb = (id: string) => data.stock.some((s) => s.store_id === id);
-  const n = (count: number, forms: [string, string, string]) => `${count} ${pluralize(count, forms)}`;
-  const describe = (r: ImportReport) => {
-    const photos =
-      r.photos.copied || r.photos.failed
-        ? `, фото: ${r.photos.copied} перенесено${r.photos.failed ? `, ${r.photos.failed} не удалось` : ""}`
-        : "";
-    if (r.mode === "new") {
-      if (r.lines.created === 0 && r.items.addedToStore === 0) return `«${title(r.storeId)}»: новых товаров в таблице нет`;
-      return (
-        `«${title(r.storeId)}»: добавлено ${n(r.items.addedToStore, ["позиция", "позиции", "позиций"])}` +
-        (r.lines.created ? `, из них новых линеек — ${r.lines.created}` : "") +
-        photos
-      );
-    }
-    return (
-      `«${title(r.storeId)}»: ${r.lines.total} линеек, ${r.items.total} позиций${photos}` +
-      (r.switched ? ". Точка теперь работает от админки" : "")
-    );
-  };
 
-  const run = async (key: string, body: object) => {
+  const call = async (key: string, request: () => Promise<string[]>) => {
     setBusy(key);
     try {
-      const report = await api<ImportReport>("/api/admin/import", { body });
-      setLog((l) => [`✓ ${describe(report)}`, ...l]);
+      const lines = await request();
+      setLog((l) => [...lines.map((t) => `✓ ${t}`), ...l]);
       onDone();
     } catch (e) {
-      setLog((l) => [`✗ ${e instanceof Error ? e.message : "Ошибка импорта"}`, ...l]);
+      setLog((l) => [`✗ ${e instanceof Error ? e.message : "Ошибка"}`, ...l]);
     } finally {
       setBusy(null);
     }
   };
 
-  const moveToAdmin = (storeId: string) => {
-    const text = inDb(storeId)
-      ? `Перенести «${title(storeId)}» в админку заново? Цены и наличие станут как в таблице, и сайт этой точки будет работать от админки.`
-      : `Перенести «${title(storeId)}» в админку? Товары, цены, наличие и фото скопируются из таблицы, и сайт этой точки будет работать от админки. Вернуть на таблицу можно в любой момент.`;
-    if (window.confirm(text)) void run(`replace-${storeId}`, { source: "sheets", storeId, mode: "replace" });
+  const sync = (storeId: string) =>
+    call(`sync-${storeId}`, async () => {
+      const { results } = await api<{ results: { text: string; error?: boolean }[] }>("/api/admin/sync", { body: { storeId } });
+      const failed = results.find((r) => r.error);
+      if (failed) throw new Error(failed.text);
+      return results.map((r) => r.text);
+    });
+
+  const fromSheet = (storeId: string, mode: Mode) => {
+    if (mode === "replace" && !window.confirm(`Заменить цены и наличие «${title(storeId)}» значениями из таблицы? Правки, сделанные в админке для этой точки, пропадут.`))
+      return;
+    void call(`${mode}-${storeId}`, async () => [(await api<{ text: string }>("/api/admin/import", { body: { source: "sheets", storeId, mode } })).text]);
   };
 
-  const replaceFromSheet = (storeId: string) => {
-    if (window.confirm(`Заменить цены и наличие «${title(storeId)}» значениями из таблицы? Правки, сделанные в админке для этой точки, пропадут.`))
-      void run(`replace-${storeId}`, { source: "sheets", storeId, mode: "replace" });
+  const switchTo = async (source: "sheet" | "db", storeId: string) => {
+    setBusy(`switch-${storeId}`);
+    try {
+      await onSwitch(source, storeId);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const importCsv = async () => {
     if (!csvFile) return;
     if (csvMode === "replace" && data.lines.length > 0 && !window.confirm("Заменить цены и наличие этой категории значениями из файла?")) return;
     const csv = await csvFile.text();
-    for (const storeId of csvStore) await run(`csv-${storeId}`, { source: "csv", storeId, category: csvCategory, csv, mode: csvMode });
+    for (const storeId of csvStore)
+      await call(`csv-${storeId}`, async () => [
+        (await api<{ text: string }>("/api/admin/import", { body: { source: "csv", storeId, category: csvCategory, csv, mode: csvMode } })).text,
+      ]);
   };
 
   return (
     <Sheet title="Таблицы и импорт" onClose={onClose}>
-      {data.stores.map((store) => {
-        const fromSheet = data.sources[store.id] === "sheet";
-        return (
-          <section key={store.id} className="space-y-2 rounded-2xl border border-line-strong p-3">
-            <h3 className="font-wide text-base font-semibold">{store.title}</h3>
-            {fromSheet ? (
-              <>
-                <p className="text-sm leading-relaxed text-ink/80">
-                  <b>Сейчас: от Google Таблицы.</b> Новые товары и изменения из таблицы появляются на сайте сами. В админке —
-                  быстрые правки наличия и цен поверх таблицы.
-                </p>
-                <SecondaryButton onClick={() => moveToAdmin(store.id)} disabled={!!busy}>
-                  {busy === `replace-${store.id}` ? "Переношу… (до пары минут)" : "Перенести точку в админку"}
-                </SecondaryButton>
-                {inDb(store.id) && data.schemaReady && (
+      {!data.schemaReady && (
+        <p className="rounded-2xl border border-danger/50 p-3 text-sm leading-relaxed">
+          Сначала обновите базу: Supabase → SQL Editor → вставьте новый <b>supabase/schema.sql</b> → Run. После этого здесь
+          появится синхронизация с таблицей и переход на админку одной кнопкой.
+        </p>
+      )}
+
+      {data.schemaReady &&
+        data.stores.map((store) => {
+          const sheetMode = data.sources[store.id] === "sheet";
+          const synced = time(data.syncedAt[store.id]);
+          return (
+            <section key={store.id} className="space-y-2 rounded-2xl border border-line-strong p-3">
+              <h3 className="font-wide text-base font-semibold">{store.title}</h3>
+              {sheetMode ? (
+                <>
+                  <p className="text-sm leading-relaxed text-ink/80">
+                    <b>Сейчас: от Google Таблицы.</b> База — копия таблицы, обновляется сама каждую минуту
+                    {synced ? ` (последний раз — ${synced})` : ""}. Вкусы, линейки, наличие и цены можно менять и здесь.
+                  </p>
+                  <SecondaryButton onClick={() => sync(store.id)} disabled={!!busy}>
+                    {busy === `sync-${store.id}` ? "Синхронизирую…" : "Обновить из таблицы сейчас"}
+                  </SecondaryButton>
+                  <PrimaryButton onClick={() => switchTo("db", store.id)} disabled={!!busy}>
+                    {busy === `switch-${store.id}` ? "Переключаю…" : "Перейти на админку"}
+                  </PrimaryButton>
+                  <p className="text-xs leading-relaxed text-muted">
+                    Переход мгновенный: всё уже в админке. Перед переключением подтянутся последние изменения таблицы, а
+                    дальше таблица на сайт не влияет. Вернуться можно в любой момент.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm leading-relaxed text-ink/80">
+                    <b>Сейчас: от админки.</b> Таблица на сайт не влияет. Вписали новинку в таблицу — добавьте её кнопкой: придёт
+                    только новое, цены и наличие остальных не изменятся.
+                  </p>
+                  <PrimaryButton onClick={() => fromSheet(store.id, "new")} disabled={!!busy}>
+                    {busy === `new-${store.id}` ? "Ищу новые товары…" : "Добавить новые из таблицы"}
+                  </PrimaryButton>
+                  <SecondaryButton onClick={() => fromSheet(store.id, "replace")} disabled={!!busy}>
+                    {busy === `replace-${store.id}` ? "Обновляю…" : "Заменить наличие и цены из таблицы"}
+                  </SecondaryButton>
                   <button
                     type="button"
-                    onClick={() => onSwitch("db", store.id)}
+                    onClick={() => switchTo("sheet", store.id)}
                     disabled={!!busy}
-                    className="w-full text-center text-[13px] font-semibold text-muted underline underline-offset-2"
+                    className="w-full pt-1 text-center text-[13px] font-semibold text-muted underline underline-offset-2"
                   >
-                    Переключить на уже перенесённые данные (без импорта)
+                    {busy === `switch-${store.id}` ? "Переключаю…" : "Вернуть точку на Google Таблицу"}
                   </button>
-                )}
-              </>
-            ) : (
-              <>
-                <p className="text-sm leading-relaxed text-ink/80">
-                  <b>Сейчас: от админки.</b> Таблица на сайт не влияет. Вписали новинку в таблицу — добавьте её кнопкой ниже:
-                  добавится только новое, цены и наличие остальных не изменятся.
-                </p>
-                <PrimaryButton onClick={() => run(`new-${store.id}`, { source: "sheets", storeId: store.id, mode: "new" })} disabled={!!busy}>
-                  {busy === `new-${store.id}` ? "Ищу новые товары…" : "Добавить новые из таблицы"}
-                </PrimaryButton>
-                <SecondaryButton onClick={() => replaceFromSheet(store.id)} disabled={!!busy}>
-                  {busy === `replace-${store.id}` ? "Импортирую… (до пары минут)" : "Заменить всё из таблицы"}
-                </SecondaryButton>
-                {data.schemaReady && (
-                  <button
-                    type="button"
-                    onClick={() => onSwitch("sheet", store.id)}
-                    disabled={!!busy}
-                    className="w-full text-center text-[13px] font-semibold text-muted underline underline-offset-2"
-                  >
-                    Вернуть точку на Google Таблицу
-                  </button>
-                )}
-              </>
-            )}
-          </section>
-        );
-      })}
+                </>
+              )}
+            </section>
+          );
+        })}
+
+      {!data.schemaReady &&
+        data.stores.map((store) => (
+          <PrimaryButton key={store.id} onClick={() => fromSheet(store.id, "replace")} disabled={!!busy}>
+            {busy === `replace-${store.id}` ? "Импортирую… (до пары минут)" : `Импортировать «${store.title}»`}
+          </PrimaryButton>
+        ))}
 
       <p className="text-xs leading-relaxed text-muted">
-        Правки из админки в саму таблицу не записываются. Таблица должна быть открыта по ссылке; если доступ закрыт —
-        перенесите листы через CSV ниже.
+        Правки из админки в саму таблицу не записываются. Таблица должна быть открыта по ссылке; если доступ закрыт — листы
+        можно перенести через CSV ниже.
       </p>
 
       <section className="space-y-3 rounded-2xl border border-line p-3">
         <h3 className="font-wide text-base font-semibold">Из CSV одного листа</h3>
         <p className="text-xs leading-relaxed text-muted">
-          В таблице откройте лист → Файл → Скачать → CSV. Фото в CSV не попадают — их можно добавить в админке. Точка
-          переходит на админку только кнопкой «Перенести точку в админку» или «Переключить…».
+          В таблице откройте лист → Файл → Скачать → CSV. Фото в CSV не попадают — их можно добавить в админке.
         </p>
         {data.lines.length > 0 && (
           <div role="radiogroup" aria-label="Что сделать" className="grid grid-cols-2 gap-1 rounded-full border border-line p-1">

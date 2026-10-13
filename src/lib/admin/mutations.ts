@@ -1,7 +1,8 @@
-import { getStore } from "@/config/stores";
+import { getStore, storeInfos } from "@/config/stores";
 import { insert, inList, remove, selectAll, update } from "@/lib/db/supabase";
 import type { DbItem, DbLine, DbStock } from "@/lib/db/types";
-import { alphabeticalOrderByLine } from "@/lib/sort";
+import { loadSettings, sourceOf } from "@/lib/db/sync";
+import { alphabeticalOrderByLine, compareTitles } from "@/lib/sort";
 import { AdminError } from "./api";
 
 /*
@@ -54,6 +55,68 @@ function url(value: unknown): string | null {
 
 const has = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key);
 
+// ─── Что пришло из Google Таблицы ───────────────────────────────────────────
+
+const LOCKED =
+  "Эта позиция из Google Таблицы, а точка работает от таблицы — название, вкусы и удаление меняются в самой таблице. Здесь можно менять наличие, цену и фото.";
+
+/** Точки «от таблицы». */
+async function sheetStores(): Promise<Set<string>> {
+  const settings = await loadSettings();
+  if (!settings?.mirror) return new Set();
+  return new Set(storeInfos.filter((s) => sourceOf(settings, s.id) === "sheet").map((s) => s.id));
+}
+
+/** Позиции, которые синхронизация ведёт из таблицы в точках «от таблицы» (их поля меняет таблица). */
+async function lockedItems(itemIds: string[]): Promise<Set<string>> {
+  const stores = await sheetStores();
+  const locked = new Set<string>();
+  if (stores.size === 0 || itemIds.length === 0) return locked;
+  for (let i = 0; i < itemIds.length; i += CHUNK) {
+    const rows = await selectAll<DbStock>("item_stock", {
+      select: "item_id,store_id,sheet_status",
+      item_id: inList(itemIds.slice(i, i + CHUNK)),
+      sheet_status: "not.is.null",
+    });
+    for (const r of rows) if (stores.has(r.store_id)) locked.add(r.item_id);
+  }
+  return locked;
+}
+
+async function lineItems(lineId: string): Promise<DbItem[]> {
+  return selectAll<DbItem>("items", { line_id: `eq.${lineId}` });
+}
+
+async function isLineLocked(lineId: string): Promise<boolean> {
+  return (await lockedItems((await lineItems(lineId)).map((i) => i.id))).size > 0;
+}
+
+/**
+ * Ставит новые позиции на место по алфавиту, не трогая порядок остальных
+ * (в линейке из таблицы порядок задаёт таблица).
+ */
+async function placeAlphabetically(lineId: string, newIds: string[]) {
+  const items = (await lineItems(lineId)).sort((a, b) => a.sort - b.sort);
+  const fresh = new Set(newIds);
+  const others = items.filter((i) => !fresh.has(i.id));
+  const rows: { id: string; line_id: string; title: string; sort: number }[] = [];
+  for (const item of items.filter((i) => fresh.has(i.id)).sort(compareTitles)) {
+    const at = others.findIndex((o) => compareTitles(item, o) < 0);
+    const prev = at === -1 ? others.at(-1) : others[at - 1];
+    const next = at === -1 ? undefined : others[at];
+    const sort = !next ? (prev?.sort ?? 0) + 10 : !prev ? next.sort - 10 : prev.sort + Math.max(1, Math.floor((next.sort - prev.sort) / 2));
+    rows.push({ id: item.id, line_id: lineId, title: item.title, sort });
+    others.splice(at === -1 ? others.length : at, 0, { ...item, sort });
+  }
+  if (rows.length) await insert("items", rows, { onConflict: "id" });
+}
+
+/** Новые/переименованные позиции — на место по алфавиту. */
+async function arrange(lineId: string, itemIds: string[]) {
+  if (await isLineLocked(lineId)) await placeAlphabetically(lineId, itemIds);
+  else await sortLines([lineId]);
+}
+
 // ─── Наличие и цены ──────────────────────────────────────────────────────────
 
 export interface StockUpdate {
@@ -99,6 +162,7 @@ export async function updateStock(raw: unknown): Promise<number> {
 
 export async function updateItem(id: string, body: Record<string, unknown>): Promise<DbItem> {
   const itemId = uuid(id);
+  if ((has(body, "title") || has(body, "variant") || has(body, "stores")) && (await lockedItems([itemId])).size) throw new AdminError(LOCKED);
   const patch: Record<string, unknown> = {};
   if (has(body, "title")) patch.title = text(body.title, "Название", { required: true });
   if (has(body, "variant")) patch.variant = text(body.variant, "Вариант");
@@ -108,7 +172,7 @@ export async function updateItem(id: string, body: Record<string, unknown>): Pro
   if (Object.keys(patch).length) [item] = await update<DbItem>("items", { id: `eq.${itemId}` }, patch);
   else [item] = await selectAll<DbItem>("items", { id: `eq.${itemId}` });
   if (!item) throw new AdminError("Позиция не найдена", 404);
-  if (patch.title !== undefined || patch.variant !== undefined) await sortLines([item.line_id]);
+  if (patch.title !== undefined || patch.variant !== undefined) await arrange(item.line_id, [item.id]);
 
   // В каких точках продаётся: добавляем недостающие строки наличия, лишние убираем.
   if (has(body, "stores")) {
@@ -129,7 +193,9 @@ export async function updateItem(id: string, body: Record<string, unknown>): Pro
 }
 
 export async function deleteItem(id: string) {
-  await remove("items", { id: `eq.${uuid(id)}` });
+  const itemId = uuid(id);
+  if ((await lockedItems([itemId])).size) throw new AdminError(LOCKED);
+  await remove("items", { id: `eq.${itemId}` });
 }
 
 // ─── Линейки ────────────────────────────────────────────────────────────────
@@ -143,12 +209,16 @@ export async function updateLine(id: string, body: Record<string, unknown>): Pro
   if (has(body, "categoryId")) patch.category_id = text(body.categoryId, "Категория", { required: true });
   if (has(body, "imageUrl")) patch.image_url = url(body.imageUrl);
   if (Object.keys(patch).length === 0) throw new AdminError("Нет изменений");
+  const fromSheet = ["name", "brand", "section", "note", "category_id"].some((k) => k in patch);
+  if (fromSheet && (await isLineLocked(uuid(id))))
+    throw new AdminError("Эта линейка из Google Таблицы — название, бренд, категория и пояснение меняются в таблице. Здесь можно менять фото, наличие и цены.");
   const [line] = await update<DbLine>("product_lines", { id: `eq.${uuid(id)}` }, patch);
   if (!line) throw new AdminError("Линейка не найдена", 404);
   return line;
 }
 
 export async function deleteLine(id: string) {
+  if (await isLineLocked(uuid(id))) throw new AdminError("Эта линейка из Google Таблицы — удалите её в таблице.");
   await remove("product_lines", { id: `eq.${uuid(id)}` }); // позиции и наличие удалятся каскадом
 }
 
@@ -212,7 +282,7 @@ export async function createProducts(body: CreateRequest): Promise<{ line: DbLin
       targetStores.map((store) => ({ item_id: item.id, store_id: store, price: itemPrice, in_stock: inStock })),
     ),
   );
-  await sortLines([line.id]); // новый вкус сразу встаёт на своё место по алфавиту
+  await arrange(line.id, items.map((i) => i.id)); // новый вкус сразу встаёт на своё место по алфавиту
   return { line, items };
 }
 
@@ -228,7 +298,10 @@ export async function sortLines(lineIds?: string[]): Promise<number> {
   if (!ids) items = await selectAll<DbItem>("items");
   else for (let i = 0; i < ids.length; i += CHUNK) items.push(...(await selectAll<DbItem>("items", { line_id: inList(ids.slice(i, i + CHUNK)) })));
 
-  const order = alphabeticalOrderByLine(items);
+  // Линейки из таблицы (точка «от таблицы») держат порядок таблицы — их не трогаем.
+  const locked = await lockedItems(items.map((i) => i.id));
+  const lockedLines = new Set(items.filter((i) => locked.has(i.id)).map((i) => i.line_id));
+  const order = alphabeticalOrderByLine(items.filter((i) => !lockedLines.has(i.line_id)));
   if (order.size === 0) return 0;
   const rows = items
     .filter((item) => order.has(item.id))

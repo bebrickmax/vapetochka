@@ -14,6 +14,7 @@ function fakeSupabase() {
     const table = url.pathname.replace("/rest/v1/", "");
     const method = init.method ?? "GET";
     const rows = tables[table];
+    if (!rows) return new Response(JSON.stringify({ message: "no table" }), { status: 404 });
     const filters = [...url.searchParams].filter(([k]) => !["select", "order", "on_conflict", "limit"].includes(k));
     const match = (row: Record<string, unknown>) =>
       filters.every(([k, v]) => (v.startsWith("in.") ? parseIn(v).includes(String(row[k])) : String(row[k]) === v.slice(3)));

@@ -15,6 +15,8 @@ export interface DbLine {
   note: string | null;
   image_url: string | null;
   sort: number;
+  /** Ключ линейки в Google Таблице (null — линейка добавлена в админке). */
+  sheet_key?: string | null;
 }
 
 export interface DbItem {
@@ -24,6 +26,8 @@ export interface DbItem {
   variant: string | null;
   image_url: string | null;
   sort: number;
+  /** Ключ позиции внутри линейки в Google Таблице (null — добавлена в админке). */
+  sheet_key?: string | null;
 }
 
 export interface DbStock {
@@ -32,6 +36,13 @@ export interface DbStock {
   price: number | string | null;
   old_price: number | string | null;
   in_stock: boolean;
+  /**
+   * Наличие и цена в Google Таблице при последней синхронизации (null — позиция не из таблицы).
+   * Синхронизация меняет наличие/цену, только если в таблице они изменились с прошлого раза:
+   * так правка из админки живёт, пока ту же клетку не поменяют в таблице.
+   */
+  sheet_status?: "in" | "out" | "unknown" | null;
+  sheet_price?: number | string | null;
 }
 
 /** Всё содержимое каталога — то, что получает админка. */

@@ -1,93 +1,69 @@
 import { getStore } from "@/config/stores";
-import { getSheetCatalog } from "@/lib/catalog";
-import { loadOverrides, loadStoreSources, removeOverrides, saveOverrides, SCHEMA_HINT, setStoreSource, type StoreSource } from "@/lib/db/overrides";
 import { selectAll } from "@/lib/db/supabase";
-import { nextOverride, sheetValues, type SheetOverride } from "@/lib/overrides";
+import { loadSettings, setStoreSource, sourceOf, syncStore, type StoreSource, type SyncReport } from "@/lib/db/sync";
 import { AdminError } from "./api";
 
 /*
- * Правки наличия и цен поверх Google Таблицы и переключение источника точки.
+ * Режим точки и синхронизация с Google Таблицей из админки.
  */
+
+export const SCHEMA_HINT = "Обновите базу: в Supabase → SQL Editor выполните supabase/schema.sql ещё раз.";
 
 function storeId(value: unknown): string {
   if (typeof value !== "string" || !getStore(value)) throw new AdminError("Неизвестная точка");
   return value;
 }
 
-function productId(value: unknown): string {
-  if (typeof value !== "string" || !/^[\w-]{1,160}$/.test(value)) throw new AdminError("Неверный id");
-  return value;
+async function mirrorSettings() {
+  const settings = await loadSettings();
+  if (!settings?.mirror) throw new AdminError(SCHEMA_HINT, 409);
+  return settings;
 }
 
-function price(value: unknown): number | null {
-  if (value === null || value === "" || value === undefined) return null;
-  const n = typeof value === "number" ? value : Number(String(value).replace(",", "."));
-  if (!Number.isFinite(n) || n < 0 || n > 100_000) throw new AdminError("Проверьте цену");
-  return Math.round(n * 100) / 100;
-}
-
-async function overridesOrHint(store: string): Promise<SheetOverride[]> {
-  const rows = await loadOverrides(store);
-  if (rows === null) throw new AdminError(SCHEMA_HINT, 409);
-  return rows;
-}
-
-export interface OverrideUpdate {
-  itemId: string;
-  inStock?: boolean;
-  price?: number | string | null;
-}
-
-/** Наличие/цена поверх таблицы. Значение, как в таблице, снимает правку. */
-export async function updateOverrides(rawStore: unknown, raw: unknown): Promise<number> {
+/** Синхронизировать точку с таблицей сейчас (фото — с большим лимитом). */
+export async function syncNow(rawStore: unknown, mode: "sync" | "new" | "replace" = "sync"): Promise<SyncReport> {
   const store = storeId(rawStore);
-  if (!Array.isArray(raw) || raw.length === 0) throw new AdminError("Нет изменений");
-  if (raw.length > 5000) throw new AdminError("Слишком много позиций за раз");
-
-  const [catalog, existing] = await Promise.all([getSheetCatalog(store), overridesOrHint(store)]);
-  const values = sheetValues(catalog.groups);
-  const current = new Map(existing.map((o) => [o.product_id, o]));
-  const save: SheetOverride[] = [];
-  const drop: string[] = [];
-
-  for (const u of raw as OverrideUpdate[]) {
-    const id = productId(u.itemId);
-    const base = values.get(id);
-    if (!base) throw new AdminError("Товар не найден в таблице — обновите страницу админки");
-    const change: { inStock?: boolean; price?: number | null } = {};
-    if (u.inStock !== undefined) {
-      if (typeof u.inStock !== "boolean") throw new AdminError("Неверное наличие");
-      change.inStock = u.inStock;
-    }
-    if (u.price !== undefined) change.price = price(u.price);
-    const row = nextOverride(current.get(id), { storeId: store, productId: id, ...base }, change);
-    if (row) save.push(row);
-    else if (current.has(id)) drop.push(id);
-  }
-
-  if (save.length) await saveOverrides(save);
-  if (drop.length) await removeOverrides(store, drop);
-  return save.length + drop.length;
+  await mirrorSettings();
+  const result = await syncStore(store, { maxPhotos: 150, onlyNew: mode === "new", force: mode === "replace" });
+  if (!result) throw new AdminError("Синхронизация этой точки уже идёт — подождите полминуты и обновите страницу.", 409);
+  return result.report;
 }
 
-/** «Как в таблице»: снимает правки с позиций (или со всей точки). */
-export async function resetOverrides(rawStore: unknown, rawIds: unknown): Promise<void> {
-  const store = storeId(rawStore);
-  await overridesOrHint(store);
-  if (rawIds === undefined || rawIds === null) return removeOverrides(store);
-  if (!Array.isArray(rawIds)) throw new AdminError("Неверный список");
-  await removeOverrides(store, rawIds.map(productId));
-}
-
-/** Откуда точка берёт товары. «Админка» — только если в базе уже есть товары этой точки. */
-export async function changeStoreSource(rawStore: unknown, rawSource: unknown): Promise<StoreSource> {
+/**
+ * Переключает источник точки.
+ *  → «от админки»: сначала последняя синхронизация, чтобы в админке было ровно то, что сейчас в таблице.
+ *  → «от таблицы»: сразу синхронизация — изменения таблицы, сделанные за это время, побеждают.
+ */
+export async function changeStoreSource(rawStore: unknown, rawSource: unknown): Promise<{ source: StoreSource; report?: SyncReport }> {
   const store = storeId(rawStore);
   if (rawSource !== "sheet" && rawSource !== "db") throw new AdminError("Неизвестный режим");
-  if ((await loadStoreSources()) === null) throw new AdminError(SCHEMA_HINT, 409);
+  const settings = await mirrorSettings();
+  const current = sourceOf(settings, store);
+
   if (rawSource === "db") {
+    const report = current === "sheet" ? await syncNow(store) : undefined;
     const stock = await selectAll("item_stock", { store_id: `eq.${store}`, limit: 1 });
-    if (stock.length === 0) throw new AdminError("Сначала перенесите товары этой точки в админку (Импорт)");
+    if (stock.length === 0) throw new AdminError("В базе нет товаров этой точки — сначала синхронизируйте её с таблицей.");
+    await setStoreSource(store, "db");
+    return { source: "db", report };
   }
-  await setStoreSource(store, rawSource);
-  return rawSource;
+
+  await setStoreSource(store, "sheet");
+  const report = current === "db" ? await syncNow(store) : undefined;
+  return { source: "sheet", report };
+}
+
+/** Короткий отчёт по-русски для админки. */
+export function describeSync(title: string, r: SyncReport): string {
+  const parts: string[] = [];
+  if (r.lines.created) parts.push(`новых линеек: ${r.lines.created}`);
+  if (r.items.created) parts.push(`новых позиций: ${r.items.created}`);
+  if (r.stock.added) parts.push(`добавлено в точку: ${r.stock.added}`);
+  if (r.stock.updated) parts.push(`обновлено наличие/цен: ${r.stock.updated}`);
+  if (r.stock.removed) parts.push(`убрано (нет в таблице): ${r.stock.removed}`);
+  if (r.photos.copied) parts.push(`фото: ${r.photos.copied}`);
+  if (r.photos.pending) parts.push(`ещё фото в очереди: ${r.photos.pending}`);
+  let text = `«${title}»: ${parts.length ? parts.join(", ") : "всё уже совпадает с таблицей"}`;
+  if (r.stock.removalSkipped) text += ". Удаление пропущено: таблица прочиталась подозрительно короткой — проверьте её";
+  return text;
 }
