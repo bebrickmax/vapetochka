@@ -51,6 +51,29 @@ create table if not exists item_stock (
 );
 create index if not exists item_stock_store_idx on item_stock (store_id);
 
+-- Откуда точка берёт товары: 'sheet' — из Google Таблицы (админка правит наличие и цены поверх неё),
+-- 'db' — только из базы (всё меняется в админке). Нет строки — 'sheet'.
+create table if not exists store_settings (
+  store_id    text primary key check (store_id in ('main', 'kamennaya-gorka')),
+  source      text not null default 'sheet' check (source in ('sheet', 'db')),
+  updated_at  timestamptz not null default now()
+);
+
+-- Быстрые правки из админки поверх Google Таблицы (режим 'sheet').
+-- Правка действует, пока в таблице не поменяли ту же клетку: рядом хранится значение таблицы
+-- на момент правки — если оно стало другим, побеждает таблица, а правка удаляется.
+create table if not exists sheet_overrides (
+  store_id      text not null check (store_id in ('main', 'kamennaya-gorka')),
+  product_id    text not null,            -- id товара на витрине (по названию линейки и вкуса)
+  in_stock      boolean,                  -- null — наличие как в таблице
+  sheet_status  text,                     -- наличие в таблице в момент правки: in / out / unknown
+  price_set     boolean not null default false,
+  price         numeric(10, 2),
+  sheet_price   numeric(10, 2),           -- цена в таблице в момент правки
+  updated_at    timestamptz not null default now(),
+  primary key (store_id, product_id)
+);
+
 -- updated_at обновляется сам.
 create or replace function touch_updated_at() returns trigger language plpgsql as $$
 begin
@@ -64,6 +87,10 @@ drop trigger if exists items_touch on items;
 create trigger items_touch before update on items for each row execute function touch_updated_at();
 drop trigger if exists item_stock_touch on item_stock;
 create trigger item_stock_touch before update on item_stock for each row execute function touch_updated_at();
+drop trigger if exists store_settings_touch on store_settings;
+create trigger store_settings_touch before update on store_settings for each row execute function touch_updated_at();
+drop trigger if exists sheet_overrides_touch on sheet_overrides;
+create trigger sheet_overrides_touch before update on sheet_overrides for each row execute function touch_updated_at();
 
 -- Безопасность: RLS включён и политик нет — публичный (anon) ключ не может ни читать,
 -- ни писать. Сайт работает только с сервера через service_role-ключ.
@@ -71,6 +98,8 @@ alter table categories    enable row level security;
 alter table product_lines enable row level security;
 alter table items         enable row level security;
 alter table item_stock    enable row level security;
+alter table store_settings  enable row level security;
+alter table sheet_overrides enable row level security;
 
 -- Бакет для фото товаров (публичное чтение по ссылке, загрузка — только с сервера).
 insert into storage.buckets (id, name, public)

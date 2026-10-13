@@ -1,5 +1,6 @@
 import { AdminError, adminRoute, json, readJson } from "@/lib/admin/api";
 import { categoryFromCsv, importCategories, importStoreFromSheets } from "@/lib/db/import";
+import { loadStoreSources, setStoreSource } from "@/lib/db/overrides";
 
 /** Импорт копирует сотни фото — даём функции до 5 минут. */
 export const maxDuration = 300;
@@ -19,11 +20,20 @@ interface ImportBody {
  *   { source: "sheets", storeId }                       — из Google Таблицы точки (с фото);
  *   { source: "csv", storeId, category, csv }           — из CSV одного листа.
  * mode: "new" — только новые линейки и вкусы, существующие цены и наличие не трогаются.
+ * Полный перенос из Google Таблицы ("replace") заодно переводит точку на админку.
  */
 export const POST = adminRoute(async (request) => {
   const body = await readJson<ImportBody>(request);
   const mode = body.mode === "new" ? "new" : "replace";
-  if (body.source === "sheets") return json(await importStoreFromSheets(body.storeId, mode));
+  if (body.source === "sheets") {
+    const report = await importStoreFromSheets(body.storeId, mode);
+    // Полный перенос из таблицы = переезд точки на админку.
+    if (mode === "replace" && (await loadStoreSources()) !== null) {
+      await setStoreSource(body.storeId, "db");
+      return json({ ...report, switched: true });
+    }
+    return json(report);
+  }
   if (body.source === "csv") {
     if (!body.category?.trim() || !body.csv?.trim()) throw new AdminError("Укажите категорию и файл CSV");
     if (body.csv.length > 3_000_000) throw new AdminError("Файл слишком большой");

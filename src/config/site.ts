@@ -46,4 +46,6 @@ export const cacheConfig = {
   /** Как часто (в секундах) сайт перечитывает таблицу сам. */
   revalidateSeconds: 60,
   tag: "catalog",
+  /** Сырые данные Google Таблиц — сбрасываются при правке таблицы. */
+  sheetsTag: "sheets",
 } as const;

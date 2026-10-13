@@ -15,6 +15,8 @@ export interface AdminActions {
   deleteLine: (id: string) => Promise<boolean>;
   /** Вкусы по алфавиту: в указанных линейках или (без аргумента) во всех. */
   sortLines: (lineIds?: string[]) => Promise<boolean>;
+  /** Точка «от таблицы»: снять правки (без списка — со всей точки). */
+  resetOverrides?: (itemIds?: string[]) => Promise<boolean>;
 }
 
 const parsePrice = (s: string) => (s.trim() === "" ? null : Number(s.replace(",", ".")));
@@ -24,12 +26,15 @@ export function LineSheet({
   view,
   data,
   storeTitle,
+  sheetMode = false,
   actions,
   onClose,
 }: {
   view: LineView;
   data: AdminData;
   storeTitle: string;
+  /** Точка работает от таблицы: здесь только наличие и цены, остальное — в таблице. */
+  sheetMode?: boolean;
   actions: AdminActions;
   onClose: () => void;
 }) {
@@ -69,14 +74,18 @@ export function LineSheet({
     if (await actions.deleteLine(line.id)) onClose();
   };
 
+  const overridden = view.all.filter((v) => v.stock.sheet?.stockOverridden || v.stock.sheet?.priceOverridden).map((v) => v.item.id);
+
   return (
     <Sheet
       title={line.name}
       onClose={onClose}
       footer={
-        <PrimaryButton onClick={save} disabled={busy || !name.trim()}>
-          Сохранить
-        </PrimaryButton>
+        sheetMode ? undefined : (
+          <PrimaryButton onClick={save} disabled={busy || !name.trim()}>
+            Сохранить
+          </PrimaryButton>
+        )
       }
     >
       <section className="space-y-2 rounded-2xl border border-line p-3">
@@ -89,9 +98,11 @@ export function LineSheet({
             Все нет
           </SecondaryButton>
         </div>
-        <SecondaryButton onClick={() => actions.sortLines([line.id])} disabled={busy}>
-          Вкусы по алфавиту А→Я
-        </SecondaryButton>
+        {!sheetMode && (
+          <SecondaryButton onClick={() => actions.sortLines([line.id])} disabled={busy}>
+            Вкусы по алфавиту А→Я
+          </SecondaryButton>
+        )}
         <div className="flex gap-2">
           <input
             inputMode="decimal"
@@ -112,6 +123,19 @@ export function LineSheet({
         </div>
       </section>
 
+      {sheetMode ? (
+        <>
+          {overridden.length > 0 && (
+            <SecondaryButton onClick={() => actions.resetOverrides?.(overridden)} disabled={busy}>
+              Вернуть как в таблице ({overridden.length})
+            </SecondaryButton>
+          )}
+          <p className="text-sm leading-relaxed text-muted">
+            Название, вкусы, бренд и фото этой линейки меняются в Google Таблице — на сайте и здесь обновятся сами.
+          </p>
+        </>
+      ) : (
+        <>
       <Field label="Название линейки" hint="Крепость в названии («20mg», «5%») покажется значком на витрине.">
         <input value={name} onChange={(e) => setName(e.target.value)} className={inputClass} />
       </Field>
@@ -140,6 +164,8 @@ export function LineSheet({
       <SecondaryButton danger onClick={remove}>
         Удалить линейку
       </SecondaryButton>
+        </>
+      )}
     </Sheet>
   );
 }

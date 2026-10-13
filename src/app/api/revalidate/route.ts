@@ -23,6 +23,7 @@ function handle(request: NextRequest) {
     return Response.json({ ok: false, message: "Неверный или не настроенный секрет" }, { status: 401 });
   }
   // Сразу помечаем данные устаревшими: следующий посетитель увидит свежую таблицу.
+  revalidateTag(cacheConfig.sheetsTag, { expire: 0 });
   revalidateTag(cacheConfig.tag, { expire: 0 });
   return Response.json({ ok: true, message: "Каталог обновлён" });
 }
