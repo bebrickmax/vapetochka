@@ -48,10 +48,14 @@ function LineCardBase({ group, visible, category, expanded = false, hideFamily =
   const items = group.items;
   const inStock = items.filter((i) => i.status === "in").length;
 
-  const prices = [...new Set(items.map((i) => i.price).filter((p): p is number => p !== null))];
-  const main = headlinePrice(items);
+  // Цена в шапке — по тем позициям, что показаны (при поиске — по найденным).
+  const priced = visible.length ? visible.map((i) => items[i]) : items;
+  const prices = [...new Set(priced.map((i) => i.price).filter((p): p is number => p !== null))];
+  const main = headlinePrice(priced);
   const minPrice = prices.length ? Math.min(...prices) : null;
-  const oldPrice = items.find((i) => i.price === main && i.oldPrice !== undefined)?.oldPrice;
+  const oldPrice = priced.find((i) => i.price === main && i.oldPrice !== undefined)?.oldPrice;
+  // Цены в линейке разные — показываем цену у каждой позиции, чтобы «от 11» не путало.
+  const mixedPrices = prices.length > 1;
 
   // Несколько разных фото внутри линейки (испарители, картриджи) — показываем их у позиций.
   const itemPhotos = new Set(items.map((i) => i.image).filter(Boolean)).size > 1;
@@ -122,7 +126,7 @@ function LineCardBase({ group, visible, category, expanded = false, hideFamily =
               key={itemIndex}
               group={group}
               itemIndex={itemIndex}
-              showPrice={item.price !== main || item.oldPrice !== undefined}
+              showPrice={mixedPrices || item.price !== main || item.oldPrice !== undefined}
               continuation={continuation}
               photo={itemPhotos && !continuation ? item.image : undefined}
               photoSlot={itemPhotos}
