@@ -12,9 +12,11 @@
    Регион — ближайший (например, Frankfurt), пароль базы сохраните, он не понадобится сайту.
 2. Слева **SQL Editor** → **New query** → вставьте содержимое файла
    [`supabase/schema.sql`](supabase/schema.sql) → **Run**. Создадутся таблицы, защита и бакет `photos` для фото.
-3. Слева **Project Settings → API** (или **Data API / API Keys**) скопируйте:
-   - **Project URL** — вида `https://abcd1234.supabase.co`;
-   - **service_role** ключ (секретный, в разделе *secret*). Никому его не пересылайте.
+3. Скопируйте два значения:
+   - **Project URL** — вида `https://abcd1234.supabase.co` (кнопка **Connect** вверху или **Settings → Data API**);
+   - **секретный ключ** — **Settings → API Keys**: новый `sb_secret_…` (раздел *Secret keys*, кнопка
+     показать/скопировать) или старый **service_role** со вкладки *Legacy API keys*. Подходит любой.
+     Никому его не пересылайте.
 
 ## 2. Переменные в Vercel
 
@@ -24,7 +26,7 @@ Vercel → проект → **Settings → Environment Variables** → доба�
 |---|---|
 | `ADMIN_PASSWORD` | Пароль входа в админку, не короче 8 символов |
 | `SUPABASE_URL` | Project URL из шага 1.3 |
-| `SUPABASE_SERVICE_ROLE_KEY` | service_role ключ из шага 1.3 |
+| `SUPABASE_SERVICE_ROLE_KEY` | секретный ключ из шага 1.3 (`sb_secret_…` или service_role) |
 
 Затем **Deployments → ⋯ у последнего деплоя → Redeploy**.
 
