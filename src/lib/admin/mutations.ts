@@ -2,6 +2,7 @@ import { getStore, storeInfos } from "@/config/stores";
 import { DbError, insert, inList, remove, selectAll, update } from "@/lib/db/supabase";
 import type { DbItem, DbLine, DbStock } from "@/lib/db/types";
 import { loadSettings, sourceOf } from "@/lib/db/sync";
+import { itemsDraft, journal, lineDraft } from "@/lib/db/trash";
 import { alphabeticalOrderByLine, compareTitles } from "@/lib/sort";
 import { AdminError } from "./api";
 
@@ -42,7 +43,7 @@ function stores(value: unknown): string[] {
   return [...new Set(value.map(storeId))];
 }
 
-function uuid(value: unknown): string {
+export function uuid(value: unknown): string {
   if (typeof value !== "string" || !/^[0-9a-f-]{36}$/i.test(value)) throw new AdminError("Неверный id");
   return value;
 }
@@ -213,10 +214,29 @@ export async function updateItem(id: string, body: Record<string, unknown>): Pro
   return item;
 }
 
-export async function deleteItem(id: string) {
+async function stockOf(itemIds: string[]): Promise<DbStock[]> {
+  const rows: DbStock[] = [];
+  for (let i = 0; i < itemIds.length; i += CHUNK) rows.push(...(await selectAll<DbStock>("item_stock", { item_id: inList(itemIds.slice(i, i + CHUNK)) })));
+  return rows;
+}
+
+/** trashId — запись в «Недавно удалённые» (null — журнала ещё нет в базе). */
+export interface Deleted {
+  trashId: string | null;
+}
+
+const trashId = (saved: { ids: string[] } | false) => (saved ? (saved.ids[0] ?? null) : null);
+
+/** Удаляет позицию во всех точках. Сначала — копия в «Недавно удалённые» (с фото, ценами и наличием). */
+export async function deleteItem(id: string): Promise<Deleted> {
   const itemId = uuid(id);
   if ((await lockedItems([itemId])).size) throw new AdminError(LOCKED);
+  const [item] = await selectAll<DbItem>("items", { id: `eq.${itemId}` });
+  if (!item) return { trashId: null }; // уже удалена
+  const [line] = await selectAll<DbLine>("product_lines", { id: `eq.${item.line_id}` });
+  const saved = line ? await journal([itemsDraft(line, [item], await stockOf([itemId]), "admin")]) : false;
   await remove("items", { id: `eq.${itemId}` });
+  return { trashId: trashId(saved) };
 }
 
 // ─── Линейки ────────────────────────────────────────────────────────────────
@@ -239,9 +259,16 @@ export async function updateLine(id: string, body: Record<string, unknown>): Pro
   return line;
 }
 
-export async function deleteLine(id: string) {
-  if (await isLineLocked(uuid(id))) throw new AdminError("Эта линейка из Google Таблицы — удалите её в таблице.");
-  await remove("product_lines", { id: `eq.${uuid(id)}` }); // позиции и наличие удалятся каскадом
+/** Удаляет линейку со всеми вкусами. Сначала — копия в «Недавно удалённые». */
+export async function deleteLine(id: string): Promise<Deleted> {
+  const lineId = uuid(id);
+  if (await isLineLocked(lineId)) throw new AdminError("Эта линейка из Google Таблицы — удалите её в таблице.");
+  const [line] = await selectAll<DbLine>("product_lines", { id: `eq.${lineId}` });
+  if (!line) return { trashId: null };
+  const items = await lineItems(lineId);
+  const saved = await journal([lineDraft(line, items, await stockOf(items.map((i) => i.id)), "admin")]);
+  await remove("product_lines", { id: `eq.${lineId}` }); // позиции и наличие удалятся каскадом
+  return { trashId: trashId(saved) };
 }
 
 // ─── Добавление товара ──────────────────────────────────────────────────────

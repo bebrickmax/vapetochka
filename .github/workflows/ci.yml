@@ -1,0 +1,29 @@
+# Проверка каждого изменения на серверах GitHub: линтер, тесты и сборка сайта.
+# Сборка идёт на демо-данных (CATALOG_SOURCE=demo) — ей не нужны ни таблица, ни база, ни секреты.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [claude/vape-catalog]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Линтер
+        run: npm run lint
+      - name: Тесты
+        run: npm test
+      - name: Сборка
+        run: npm run build
+        env:
+          CATALOG_SOURCE: demo
+          NEXT_TELEMETRY_DISABLED: "1"

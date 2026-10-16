@@ -91,6 +91,20 @@ create unique index if not exists items_sheet_key_uq on items (line_id, sheet_ke
 alter table product_lines add column if not exists is_new boolean not null default false;
 alter table items         add column if not exists is_new boolean not null default false;
 
+-- «Недавно удалённые»: полная копия удалённой линейки или вкусов (название, фото, «Новинка», порядок,
+-- наличие и цены по точкам) — вернуть одной кнопкой в админке. Пишется перед удалением в админке и перед
+-- тем, как синхронизация уберёт строку, которую убрали из Google Таблицы. Старше 30 дней — удаляется сама.
+create table if not exists deleted_items (
+  id          uuid primary key default gen_random_uuid(),
+  kind        text not null check (kind in ('line', 'item')),   -- линейка целиком / вкусы одной линейки
+  label       text not null,                                    -- «Рик 50mg: 🍌Банан, 🍉Арбуз»
+  store_ids   text[] not null default '{}',                     -- в каких точках продавалось
+  source      text not null default 'admin' check (source in ('admin', 'sheet')),  -- удалили в админке / убрали из таблицы
+  payload     jsonb not null,                                   -- { lines: [...], items: [...], stock: [...] }
+  deleted_at  timestamptz not null default now()
+);
+create index if not exists deleted_items_deleted_idx on deleted_items (deleted_at desc);
+
 -- updated_at обновляется сам.
 create or replace function touch_updated_at() returns trigger language plpgsql as $$
 begin
@@ -117,6 +131,7 @@ alter table items         enable row level security;
 alter table item_stock    enable row level security;
 alter table store_settings  enable row level security;
 alter table sheet_overrides enable row level security;
+alter table deleted_items   enable row level security;
 
 -- Бакет для фото товаров (публичное чтение по ссылке, загрузка — только с сервера).
 insert into storage.buckets (id, name, public)

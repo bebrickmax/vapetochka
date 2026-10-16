@@ -10,6 +10,7 @@ import { AddSheet } from "./AddSheet";
 import { api, UnauthorizedError } from "./api";
 import { ItemSheet, LineSheet, type AdminActions } from "./EditSheets";
 import { ImportSheet } from "./ImportSheet";
+import { TrashSheet } from "./TrashSheet";
 import {
   brandsOf,
   buildView,
@@ -153,12 +154,13 @@ type Open =
   | { kind: "line"; lineId: string }
   | { kind: "item"; itemId: string }
   | { kind: "import" }
+  | { kind: "trash" }
   | null;
 
 function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
   const [data, setData] = useState<AdminData | null>(null);
   const [loadError, setLoadError] = useState("");
-  const [toast, setToast] = useState<{ text: string; error?: boolean } | null>(null);
+  const [toast, setToast] = useState<{ text: string; error?: boolean; action?: { label: string; run: () => void } } | null>(null);
   const [open, setOpen] = useState<Open>(null);
   const [filters, setFilters] = useState<Filters>({ storeId: "main", query: "", categoryId: "", brand: "", status: "all" });
   const deferredQuery = useDeferredValue(filters.query);
@@ -167,10 +169,11 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     dataRef.current = data;
   }, [data]);
 
-  const notify = useCallback((text: string, error = false) => {
-    setToast({ text, error });
-    // Длинное сообщение (отчёт синхронизации, причина отказа) держим дольше — чтобы успеть прочитать.
-    const ms = Math.max(error ? 5000 : 2200, Math.min(12000, text.length * 55));
+  const notify = useCallback((text: string, error = false, action?: { label: string; run: () => void }) => {
+    setToast({ text, error, action });
+    // Длинное сообщение (отчёт синхронизации, причина отказа) держим дольше — чтобы успеть прочитать;
+    // с кнопкой («Вернуть») — тоже, чтобы успеть нажать.
+    const ms = Math.max(error ? 5000 : action ? 8000 : 2200, Math.min(12000, text.length * 55));
     window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), ms);
   }, []);
 
@@ -233,6 +236,21 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- один раз при открытии
   }, []);
+
+  /** Вернуть из «Недавно удалённых» (кнопка в уведомлении сразу после удаления). */
+  const restoreFromTrash = useCallback(
+    async (trashId: string) => {
+      setToast(null);
+      try {
+        const { text } = await api<{ text: string }>("/api/admin/trash", { body: { id: trashId } });
+        notify(text);
+        await load();
+      } catch (e) {
+        handleError(e);
+      }
+    },
+    [notify, load, handleError],
+  );
 
   /** Оптимистично: сразу меняем экран, затем сохраняем; при ошибке — откат. */
   const optimistic = useCallback(
@@ -301,7 +319,17 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           () => api(`/api/admin/items/${id}`, { method: "PATCH", body: patch }),
           savedText(patch),
         ),
-      deleteItem: (id) => optimistic((d) => removeItem(d, id), () => api(`/api/admin/items/${id}`, { method: "DELETE" }), "Удалено"),
+      deleteItem: async (id) => {
+        let trashId: string | null = null;
+        const ok = await optimistic(
+          (d) => removeItem(d, id),
+          async () => {
+            trashId = (await api<{ trashId?: string | null }>(`/api/admin/items/${id}`, { method: "DELETE" })).trashId ?? null;
+          },
+        );
+        if (ok) notify("Удалено", false, trashId ? { label: "Вернуть", run: () => void restoreFromTrash(trashId!) } : undefined);
+        return ok;
+      },
       updateLine: (id, patch) =>
         optimistic(
           (d) =>
@@ -316,7 +344,17 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           () => api(`/api/admin/lines/${id}`, { method: "PATCH", body: patch }),
           savedText(patch),
         ),
-      deleteLine: (id) => optimistic((d) => removeLine(d, id), () => api(`/api/admin/lines/${id}`, { method: "DELETE" }), "Линейка удалена"),
+      deleteLine: async (id) => {
+        let trashId: string | null = null;
+        const ok = await optimistic(
+          (d) => removeLine(d, id),
+          async () => {
+            trashId = (await api<{ trashId?: string | null }>(`/api/admin/lines/${id}`, { method: "DELETE" })).trashId ?? null;
+          },
+        );
+        if (ok) notify("Линейка удалена", false, trashId ? { label: "Вернуть", run: () => void restoreFromTrash(trashId!) } : undefined);
+        return ok;
+      },
       sortLines: (lineIds) =>
         optimistic(
           (d) => sortItems(d, lineIds),
@@ -340,7 +378,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
         );
       },
     }),
-    [optimistic, storeId],
+    [optimistic, storeId, notify, restoreFromTrash],
   );
 
   const locks = useMemo(() => (data ? sheetLocks(data) : { items: new Set<string>(), lines: new Set<string>() }), [data]);
@@ -448,6 +486,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           </div>
           <Menu
             onImport={() => setOpen({ kind: "import" })}
+            onTrash={() => setOpen({ kind: "trash" })}
             onSortAll={
               unlockedLines
                 ? () => {
@@ -655,6 +694,15 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
           }`}
         >
           {toast.text}
+          {toast.action && (
+            <button
+              type="button"
+              onClick={toast.action.run}
+              className="btn-paper ml-3 inline-flex h-9 items-center rounded-full px-4 align-middle text-sm font-bold active:scale-95"
+            >
+              {toast.action.label}
+            </button>
+          )}
         </div>
       )}
 
@@ -699,11 +747,32 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
       )}
       {openItem && <ItemSheet item={openItem} data={data} locked={locks.items.has(openItem.id)} actions={actions} onClose={() => setOpen(null)} />}
       {open?.kind === "import" && <ImportSheet data={data} onClose={() => setOpen(null)} onDone={load} onSwitch={switchSource} />}
+      {open?.kind === "trash" && (
+        <TrashSheet
+          data={data}
+          onClose={() => setOpen(null)}
+          onRestored={(text) => {
+            notify(text);
+            void load();
+          }}
+          onError={handleError}
+        />
+      )}
     </div>
   );
 }
 
-function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortAll?: () => void; onLogout: () => void }) {
+function Menu({
+  onImport,
+  onTrash,
+  onSortAll,
+  onLogout,
+}: {
+  onImport: () => void;
+  onTrash: () => void;
+  onSortAll?: () => void;
+  onLogout: () => void;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <div className="relative">
@@ -722,6 +791,9 @@ function Menu({ onImport, onSortAll, onLogout }: { onImport: () => void; onSortA
           <div className="animate-fade-in absolute right-0 top-12 z-50 w-56 overflow-hidden rounded-2xl border border-line bg-raised shadow-xl">
             <button type="button" onClick={() => { setOpen(false); onImport(); }} className="block w-full px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
               Таблицы и импорт
+            </button>
+            <button type="button" onClick={() => { setOpen(false); onTrash(); }} className="block w-full border-t border-line px-4 py-3 text-left text-sm font-semibold active:bg-white/10">
+              Недавно удалённые
             </button>
             {onSortAll && (
               <button type="button" onClick={() => { setOpen(false); onSortAll(); }} className="block w-full border-t border-line px-4 py-3 text-left text-sm font-semibold active:bg-white/10">

@@ -12,8 +12,10 @@ import {
   planStock,
   sheetLines,
   type PhotoNeed,
+  type StockWrite,
   type SyncContext,
 } from "./sync-plan";
+import { journal, removalDrafts } from "./trash";
 import type { DbItem, DbLine, DbSnapshot, DbStock } from "./types";
 
 /*
@@ -101,6 +103,23 @@ async function removeIn(table: string, column: string, ids: string[], extra: Rec
   for (let i = 0; i < ids.length; i += CHUNK) await remove(table, { ...extra, [column]: inList(ids.slice(i, i + CHUNK)) });
 }
 
+async function selectIn<T>(table: string, ids: string[]): Promise<T[]> {
+  const rows: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) rows.push(...(await selectAll<T>(table, { id: inList(ids.slice(i, i + CHUNK)) })));
+  return rows;
+}
+
+/** Поля, которые синхронизация меняет у линеек и позиций (метку «Новинка» и прочее админки не трогает). */
+const LINE_FIELDS = ["name", "brand", "section", "note", "sheet_key", "sort"] as const;
+const ITEM_FIELDS = ["title", "variant", "sheet_key", "sort"] as const;
+
+/** Только изменившиеся поля next относительно base. */
+function changed<T extends object>(next: T, base: T, fields: readonly (keyof T)[]): Partial<T> {
+  const out: Partial<T> = {};
+  for (const f of fields) if ((next[f] ?? null) !== (base[f] ?? null)) out[f] = next[f];
+  return out;
+}
+
 const lineRow = (l: DbLine) => ({
   id: l.id,
   category_id: l.category_id,
@@ -121,15 +140,30 @@ const itemRow = (i: DbItem) => ({
   sort: i.sort,
   sheet_key: i.sheet_key ?? null,
 });
-const stockRow = (s: DbStock) => ({
-  item_id: s.item_id,
-  store_id: s.store_id,
-  price: s.price,
-  old_price: s.old_price,
-  in_stock: s.in_stock,
-  sheet_status: s.sheet_status ?? null,
-  sheet_price: s.sheet_price ?? null,
-});
+
+/**
+ * Правки линеек / позиций поверх их текущих строк в базе. Строки перечитываются прямо перед записью:
+ * пока копировались фото (до пары минут), в админке могли поставить своё фото — его не затираем
+ * старой копией. Удалённое за это время не воскрешаем.
+ */
+async function applyPatches<T extends { id: string }>(table: string, patches: Map<string, Partial<T>>, toRow: (row: T) => object) {
+  if (patches.size === 0) return;
+  const fresh = await selectIn<T>(table, [...patches.keys()]);
+  await insertBatched(table, fresh.map((row) => toRow({ ...row, ...patches.get(row.id) })), "id");
+}
+
+/**
+ * Записи наличия пачками с одинаковым набором колонок: PostgREST при upsert обновляет только
+ * переданные колонки, а в одной пачке у всех строк должны быть одни и те же.
+ */
+async function writeStock(rows: StockWrite[]) {
+  const groups = new Map<string, StockWrite[]>();
+  for (const row of rows) {
+    const key = Object.keys(row).sort().join(",");
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+  for (const group of groups.values()) await insertBatched("item_stock", group, "item_id,store_id");
+}
 
 interface PhotoBudget {
   left: number;
@@ -169,7 +203,16 @@ export interface SyncReport {
   storeId: string;
   lines: { created: number; updated: number; removed: number };
   items: { created: number; updated: number; removed: number };
-  stock: { added: number; updated: number; removed: number; removalSkipped: boolean; skipReason?: "mass" | "partial" };
+  /** skipReason: mass — уходит слишком много, partial — список листов был запасной, journal — не сохранилась копия. */
+  stock: {
+    added: number;
+    updated: number;
+    removed: number;
+    removalSkipped: boolean;
+    skipReason?: "mass" | "partial" | "journal";
+    /** Убранное сохранено в «Недавно удалённые». */
+    journaled?: boolean;
+  };
   photos: { copied: number; failed: number; pending: number };
   first: boolean;
   changed: boolean;
@@ -266,13 +309,12 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
     const id = createdByKey.get(c.ref);
     if (id) lineIds.set(c.ref, id);
   }
-  const lineUpdates = new Map(lp.update.map((l) => [l.id, l]));
   const linesById = new Map(snapshot.lines.map((l) => [l.id, l]));
-  for (const [ref, url] of linePhotos) {
-    const base = lineUpdates.get(ref) ?? linesById.get(ref);
-    if (base) lineUpdates.set(ref, { ...base, image_url: url });
-  }
-  await insertBatched("product_lines", [...lineUpdates.values()].map(lineRow), "id");
+  const lineUpdates = new Map<string, Partial<DbLine>>();
+  for (const next of lp.update) lineUpdates.set(next.id, changed(next, linesById.get(next.id) ?? next, LINE_FIELDS));
+  for (const [ref, url] of linePhotos) if (linesById.has(ref)) lineUpdates.set(ref, { ...lineUpdates.get(ref), image_url: url });
+  for (const [id, patch] of lineUpdates) if (Object.keys(patch).length === 0) lineUpdates.delete(id);
+  await applyPatches<DbLine>("product_lines", lineUpdates, lineRow);
   report.lines.created = created.length;
   report.lines.updated = lineUpdates.size;
 
@@ -289,33 +331,52 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
     const id = createdItemsByKey.get(c.ref);
     if (id) itemIds.set(c.ref, id);
   }
-  const itemUpdates = new Map(ip.update.map((i) => [i.id, i]));
   const itemsById = new Map(snapshot.items.map((i) => [i.id, i]));
-  for (const [ref, url] of itemPhotos) {
-    const base = itemUpdates.get(ref) ?? itemsById.get(ref);
-    if (base) itemUpdates.set(ref, { ...base, image_url: url });
-  }
-  await insertBatched("items", [...itemUpdates.values()].map(itemRow), "id");
+  const itemUpdates = new Map<string, Partial<DbItem>>();
+  for (const next of ip.update) itemUpdates.set(next.id, changed(next, itemsById.get(next.id) ?? next, ITEM_FIELDS));
+  for (const [ref, url] of itemPhotos) if (itemsById.has(ref)) itemUpdates.set(ref, { ...itemUpdates.get(ref), image_url: url });
+  for (const [id, patch] of itemUpdates) if (Object.keys(patch).length === 0) itemUpdates.delete(id);
+  await applyPatches<DbItem>("items", itemUpdates, itemRow);
   report.items.created = createdItems.length;
   report.items.updated = itemUpdates.size;
 
-  // 4. Наличие и цены точки.
-  const sp = planStock(lines, itemIds, lineIds, snapshot, ctx);
-  await insertBatched("item_stock", sp.upsert.map(stockRow), "item_id,store_id");
-  if (sp.remove.length) await removeIn("item_stock", "item_id", sp.remove, { store_id: `eq.${storeId}` });
+  // 4. Наличие и цены точки — по свежему наличию из базы, а не по снимку из начала синхронизации:
+  // пока копировались фото, в админке могли переключить наличие или цену. Пишутся только колонки,
+  // которые поменяла таблица.
+  const fresh: DbSnapshot = { ...snapshot, stock: await selectAll<DbStock>("item_stock", { order: "item_id.asc,store_id.asc" }) };
+  const sp = planStock(lines, itemIds, lineIds, fresh, ctx);
+  await writeStock(sp.upsert);
+
+  // 5. Что убрали из таблицы: строки наличия точки, а позиции и линейки из таблицы, которые больше нигде
+  // не продаются, — целиком. Сначала копия в «Недавно удалённые»: без неё ничего не удаляем.
+  let removeStock = sp.remove;
+  let journaled = false;
+  let cleanup = planCleanup(fresh, { storeId, itemIds: removeStock }, { lines: new Set(lineIds.values()), items: new Set(itemIds.values()) }, ctx);
+  if (removeStock.length || cleanup.items.length || cleanup.lines.length) {
+    const drafts = removalDrafts(fresh, { storeId, stockItemIds: removeStock, items: cleanup.items, lines: cleanup.lines }, "sheet");
+    const saved = await journal(drafts).catch((error) => {
+      console.error(`[sync] «${store.title}»: не удалось сохранить копию удаляемого — удаление отложено:`, error);
+      return null;
+    });
+    if (saved === null) {
+      removeStock = [];
+      cleanup = { items: [], lines: [] };
+    }
+    journaled = !!saved && saved.ids.length > 0;
+  }
+  if (removeStock.length) await removeIn("item_stock", "item_id", removeStock, { store_id: `eq.${storeId}` });
+  if (cleanup.items.length) await removeIn("items", "id", cleanup.items);
+  if (cleanup.lines.length) await removeIn("product_lines", "id", cleanup.lines);
+  const deferred = removeStock.length < sp.remove.length;
   report.stock = {
     added: sp.added,
     updated: sp.updated,
-    removed: sp.remove.length,
-    removalSkipped: sp.removalSkipped,
-    ...(sp.skipReason && { skipReason: sp.skipReason }),
+    removed: removeStock.length,
+    removalSkipped: sp.removalSkipped || deferred,
+    journaled,
+    ...(sp.skipReason ? { skipReason: sp.skipReason } : deferred && { skipReason: "journal" as const }),
   };
   if (sp.removalSkipped) console.warn(`[sync] «${store.title}»: удаление пропущено (${sp.skipReason}) — таблица могла прочитаться не целиком`);
-
-  // 5. Уборка: позиции и линейки из таблицы, которые больше нигде не продаются.
-  const cleanup = planCleanup(snapshot, { storeId, itemIds: sp.remove }, { lines: new Set(lineIds.values()), items: new Set(itemIds.values()) }, ctx);
-  if (cleanup.items.length) await removeIn("items", "id", cleanup.items);
-  if (cleanup.lines.length) await removeIn("product_lines", "id", cleanup.lines);
   report.items.removed = cleanup.items.length;
   report.lines.removed = cleanup.lines.length;
 
@@ -325,7 +386,7 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
     report.items.created + report.items.updated + report.items.removed > 0 ||
     report.stock.added + report.stock.updated + report.stock.removed > 0;
 
-  return { report, sheets, snapshot: report.changed ? null : snapshot };
+  return { report, sheets, snapshot: report.changed ? null : fresh };
 }
 
 /** Синхронизирует все точки «от таблицы». Ошибка одной точки не мешает другой. */
