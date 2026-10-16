@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { revalidateTag } from "next/cache";
 import { cacheConfig } from "@/config/site";
+import { warmStorefront } from "@/lib/admin/api";
 
 /**
  * Мгновенное обновление сайта после правки таблицы.
@@ -22,9 +23,11 @@ function handle(request: NextRequest) {
   if (!isAuthorized(request)) {
     return Response.json({ ok: false, message: "Неверный или не настроенный секрет" }, { status: 401 });
   }
-  // Сразу помечаем данные устаревшими: следующий посетитель увидит свежую таблицу.
+  // Таблицу нужно перечитать заново (мягкий сброс мог бы собрать каталог из прежней копии таблицы),
+  // а чтобы первый покупатель не ждал, пока она скачается, страницы точек сразу открывает сам сайт.
   revalidateTag(cacheConfig.sheetsTag, { expire: 0 });
   revalidateTag(cacheConfig.tag, { expire: 0 });
+  warmStorefront(request);
   return Response.json({ ok: true, message: "Каталог обновлён" });
 }
 

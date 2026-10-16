@@ -2,36 +2,31 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import type { StoreInfo } from "@/config/stores";
 import { readStoreChoice, saveStoreChoice } from "@/lib/store-choice";
 import { Logo, LogoMark } from "./Logo";
 
 /**
- * Экран выбора точки. Если точка уже выбрана на этом устройстве, сразу
- * переводит в её каталог (сохраняя #категорию из ссылки). С ?change=1 —
- * всегда показывает выбор: так работает кнопка «Сменить точку».
+ * Экран выбора точки. Если точка уже выбрана на этом устройстве, в её каталог
+ * (с #категорией из ссылки) переводит ещё до загрузки сайта скрипт в <head>
+ * (INTRO_SCRIPT), а здесь — только при переходе на главную внутри сайта.
+ * С ?change=1 — всегда показывает выбор. Экран виден сразу, без скриптов:
+ * ссылки на точки работают, даже если JavaScript не загрузился.
  */
 export function StorePicker({ stores }: { stores: StoreInfo[] }) {
   const router = useRouter();
-  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
     const saved = readStoreChoice();
-    if (saved && !params.has("change")) {
-      router.replace(`/${saved}${window.location.hash}`);
-      return;
-    }
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- выбор хранится только в браузере
-    setChecking(false);
+    if (saved && !new URLSearchParams(window.location.search).has("change")) router.replace(`/${saved}${window.location.hash}`);
   }, [router]);
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col px-5 pb-[max(env(safe-area-inset-bottom),1.5rem)] pt-[max(env(safe-area-inset-top),2.5rem)]">
       <Logo className="animate-rise h-auto w-56 text-ink" />
 
-      <div className={`mt-auto pt-16 transition-opacity duration-300 ${checking ? "opacity-0" : "opacity-100"}`}>
+      <div className="mt-auto pt-16">
         <h1 className="font-wide text-[26px] font-semibold leading-tight">Выберите прайс</h1>
         <p className="mt-2 text-[15px] leading-relaxed text-muted">
           Наличие в них разное. Каталог покажет то, что есть в выбранном прайсе.

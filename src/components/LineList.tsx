@@ -55,13 +55,17 @@ export function LineList({ sections, categories, expanded }: LineListProps) {
     return () => observer.disconnect();
   }, [hasMore, limit]);
 
-  let budget = limit;
+  // Сколько линеек каждого раздела уже показать: разделы по порядку, всего не больше limit.
+  const shownCounts = sections.reduce<number[]>((counts, section) => {
+    const used = counts.reduce((sum, n) => sum + n, 0);
+    return [...counts, Math.max(0, Math.min(section.entries.length, limit - used))];
+  }, []);
+
   return (
     <div className="space-y-8">
-      {sections.map((section) => {
-        if (budget <= 0) return null;
-        const entries = section.entries.slice(0, budget);
-        budget -= entries.length;
+      {sections.map((section, sectionIndex) => {
+        if (shownCounts[sectionIndex] === 0) return null;
+        const entries = section.entries.slice(0, shownCounts[sectionIndex]);
         const lines = section.entries.length;
         // «Skala» над единственной карточкой «Skala» — лишний повтор: заголовок раздела прячем.
         const showTitle =

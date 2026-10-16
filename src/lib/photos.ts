@@ -43,10 +43,19 @@ export function proxyImages(
   return result;
 }
 
-/** Адрес фото нужного размера. */
+/** Фото из хранилища Supabase (публичный бакет photos): https://<проект>.supabase.co/storage/v1/object/public/photos/… */
+const STORAGE_PHOTO_RE = /^https:\/\/[a-z0-9-]+\.supabase\.(?:co|in)\/storage\/v1\/object\/public\/photos\/[A-Za-z0-9/._-]+$/;
+export const isStoragePhoto = (url: string) => STORAGE_PHOTO_RE.test(url);
+
+/**
+ * Адрес фото нужного размера. Фото из хранилища (импорт из таблицы — 1200 px, фото с телефона)
+ * тоже идут через /api/photo: сайт уменьшает их до размера карточки и кэширует на CDN, иначе
+ * телефон качал бы полноразмерные картинки на каждую карточку (медленно, тяжело для памяти айфона).
+ */
 export function sizedPhoto(url: string, size: number): string {
   const allowed = PHOTO_SIZES.find((s) => s >= size) ?? PHOTO_SIZES[PHOTO_SIZES.length - 1];
   if (url.startsWith("/api/photo")) return `${url}&s=${allowed}`;
   if (url.includes("/sheets-images-rt/")) return `${url}=s${allowed}`;
-  return url; // фото из хранилища (Supabase) или внешняя ссылка — как есть
+  if (isStoragePhoto(url)) return `/api/photo?${new URLSearchParams({ u: url, s: String(allowed) })}`;
+  return url; // внешняя ссылка — как есть
 }

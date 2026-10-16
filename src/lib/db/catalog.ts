@@ -54,12 +54,15 @@ export function catalogFromSnapshot(snapshot: DbSnapshot, storeId: string): Cata
     const parsed = lines.map((line) => {
       const items: ProductItem[] = itemsByLine.get(line.id)!.map((item) => {
         const stock = stockByItem.get(item.id)!;
+        const price = toPrice(stock.price);
+        // Старая цена из таблицы осталась, а цену поменяли в админке — зачёркивать уже нечего.
         const oldPrice = toPrice(stock.old_price);
+        const discounted = oldPrice !== null && price !== null && oldPrice > price;
         return {
           ...splitItemName(item.title),
           ...(item.variant && { variant: item.variant }),
-          price: toPrice(stock.price),
-          ...(oldPrice !== null && { oldPrice }),
+          price,
+          ...(discounted && { oldPrice }),
           status: stock.in_stock ? "in" : "out",
           ...(item.image_url && { image: item.image_url }),
         };
