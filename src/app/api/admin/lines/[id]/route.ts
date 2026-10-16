@@ -11,6 +11,5 @@ export const PATCH = adminRoute<Context>(async (request, { params }) => {
 
 /** Удалить линейку вместе со всеми вкусами. */
 export const DELETE = adminRoute<Context>(async (_request, { params }) => {
-  await deleteLine((await params).id);
-  return json({ deleted: true });
+  return json({ deleted: true, ...(await deleteLine((await params).id)) });
 });

@@ -87,7 +87,8 @@ function LineCardBase({ group, visible, category, expanded = false, hideFamily =
                   <span className="truncate">{[category?.title, above].filter(Boolean).join(", ")}</span>
                 </p>
               )}
-              <h3 className="font-wide mt-0.5 text-[17px] font-semibold leading-[1.2] text-ink [overflow-wrap:anywhere]">
+              {/* На экранах 320 px (старые айфоны) — чуть мельче, чтобы слова не рвались посередине. */}
+              <h3 className="font-wide mt-0.5 text-[14px] font-semibold leading-[1.2] text-ink [overflow-wrap:anywhere] max-[359px]:hyphens-auto min-[360px]:text-[17px]">
                 {title}
               </h3>
             </div>

@@ -54,6 +54,8 @@ export async function changeStoreSource(rawStore: unknown, rawSource: unknown): 
     const report = current === "sheet" ? await syncNow(store, "sync", { max: 400, seconds: 170 }) : undefined;
     if (report?.stock.removalSkipped && report.stock.skipReason === "partial")
       throw new AdminError("Google сейчас не отдал список листов таблицы — переключение отменено, чтобы ничего не потерять. Попробуйте через пару минут.", 409);
+    if (report?.stock.removalSkipped && report.stock.skipReason === "journal")
+      throw new AdminError("База сейчас не сохранила копию убранных из таблицы позиций — переключение отменено. Попробуйте через пару минут.", 409);
     if (report && report.photos.pending > 0)
       throw new AdminError(
         `Перейти на админку пока нельзя: из таблицы ещё не скопировано ${report.photos.pending} фото` +
@@ -88,6 +90,9 @@ export function describeSync(title: string, r: SyncReport): string {
     text +=
       r.stock.skipReason === "partial"
         ? ". Удаление пропущено: Google не отдал список листов, взят запасной — убранное из таблицы уберу при следующей синхронизации"
-        : ". Удаление пропущено: таблица прочиталась подозрительно короткой — проверьте её";
+        : r.stock.skipReason === "journal"
+          ? ". Удаление отложено: не сохранилась копия в «Недавно удалённые» — уберу при следующей синхронизации"
+          : ". Удаление пропущено: таблица прочиталась подозрительно короткой — проверьте её";
+  else if (r.stock.removed && r.stock.journaled) text += ". Убранное можно вернуть: меню ⋯ → «Недавно удалённые»";
   return text;
 }

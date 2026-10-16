@@ -10,6 +10,5 @@ export const PATCH = adminRoute<Context>(async (request, { params }) => {
 });
 
 export const DELETE = adminRoute<Context>(async (_request, { params }) => {
-  await deleteItem((await params).id);
-  return json({ deleted: true });
+  return json({ deleted: true, ...(await deleteItem((await params).id)) });
 });

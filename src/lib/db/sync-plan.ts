@@ -297,8 +297,14 @@ export function planItems(
 
 // ─── Наличие и цены точки ───────────────────────────────────────────────────
 
+/**
+ * Запись строки наличия: ключ + только те колонки, которые меняет таблица. Остальное (например, наличие,
+ * которое только что переключили в админке, пока синхронизация копировала фото) остаётся как есть.
+ */
+export type StockWrite = Pick<DbStock, "item_id" | "store_id"> & Partial<Omit<DbStock, "item_id" | "store_id">>;
+
 export interface StockPlan {
-  upsert: DbStock[];
+  upsert: StockWrite[];
   /** id позиций, которые больше не продаются в точке (их нет в таблице). */
   remove: string[];
   added: number;
@@ -358,23 +364,15 @@ export function planStock(
         }
         continue;
       }
-      // «Кто последний, тот и прав»: таблица меняет только то, что в ней изменилось с прошлого раза.
-      const next: DbStock = { ...pickStock(row) };
-      let changed = false;
-      if (row.sheet_status !== item.status) {
-        Object.assign(next, { in_stock: sheetInStock(item.status), sheet_status: item.status });
-        changed = true;
-      }
-      if (num(row.sheet_price) !== item.price) {
-        Object.assign(next, { price: item.price, old_price: item.oldPrice, sheet_price: item.price });
-        changed = true;
-      }
+      // «Кто последний, тот и прав»: таблица меняет только то, что в ней изменилось с прошлой синхронизации.
+      // Сравниваем таблицу не с базой, а с её же прошлым значением (sheet_status / sheet_price): так правка
+      // админки живёт, пока ту же клетку не поменяют в таблице, а прогон без изменений ничего не пишет.
+      const next: StockWrite = { item_id: id, store_id: ctx.storeId };
+      if (row.sheet_status !== item.status) Object.assign(next, { in_stock: sheetInStock(item.status), sheet_status: item.status });
+      if (num(row.sheet_price) !== item.price) Object.assign(next, { price: item.price, old_price: item.oldPrice, sheet_price: item.price });
       // Старую (зачёркнутую) цену меняют только в таблице — в админке её нет, поэтому она всегда как в таблице.
-      if (num(next.old_price) !== item.oldPrice) {
-        next.old_price = item.oldPrice;
-        changed = true;
-      }
-      if (changed) {
+      else if (num(row.old_price) !== item.oldPrice) next.old_price = item.oldPrice;
+      if (Object.keys(next).length > 2) {
         plan.upsert.push(next);
         plan.updated++;
       }
@@ -392,16 +390,6 @@ export function planStock(
   }
   return plan;
 }
-
-const pickStock = (s: DbStock): DbStock => ({
-  item_id: s.item_id,
-  store_id: s.store_id,
-  price: num(s.price),
-  old_price: num(s.old_price),
-  in_stock: s.in_stock,
-  sheet_status: s.sheet_status ?? null,
-  sheet_price: num(s.sheet_price),
-});
 
 // ─── Уборка ────────────────────────────────────────────────────────────────
 

@@ -1,6 +1,6 @@
 import { cacheLife, cacheTag } from "next/cache";
 import { cacheConfig, sheetsConfig } from "@/config/site";
-import { getStore, stores, type Store } from "@/config/stores";
+import { getStore, type Store } from "@/config/stores";
 import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
 import { assignFamilies } from "@/lib/brands";
 import { proxyImages } from "@/lib/photos";
@@ -9,7 +9,7 @@ import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
 import { catalogFromSnapshot, loadSnapshot } from "@/lib/db/catalog";
 import { cleanupOverrides, loadOverrides } from "@/lib/db/overrides";
-import { loadSettings, sourceOf, syncStore, type StoreSource, type SyncResult } from "@/lib/db/sync";
+import { loadSettings, sourceOf, syncStore, type SyncResult } from "@/lib/db/sync";
 import type { DbSnapshot } from "@/lib/db/types";
 import { isDbConfigured } from "@/lib/db/supabase";
 import { applyOverrides } from "@/lib/overrides";
@@ -99,16 +99,13 @@ async function loadDbCatalog(
 }
 
 /**
- * Режимы точек с прошлого удачного чтения базы. Если база сейчас не отвечает, ошибка не кэшируется —
- * остаётся прошлый ответ (до 30 дней), и по нему видно, что точка работает «от админки».
+ * Ошибка, после которой витрина остаётся на последней удачной версии.
+ *
+ * Страницы точек собираются заранее (generateStaticParams) и лежат в кэше Vercel (ISR) — он общий для всех
+ * серверов и переживает холодный старт. Если пересборка в фоне падает, Next.js не заменяет страницу и
+ * повторяет попытку при следующем запросе; при деплое падает сборка — и остаётся прошлый деплой.
  */
-async function lastKnownSources(): Promise<Record<string, StoreSource>> {
-  "use cache";
-  cacheTag(cacheConfig.settingsTag);
-  cacheLife({ stale: 60, revalidate: 60, expire: 60 * 60 * 24 * 30 });
-  const settings = await loadSettings();
-  return Object.fromEntries(stores.map((s) => [s.id, sourceOf(settings, s.id)]));
-}
+class KeepLastVersion extends Error {}
 
 const cacheProfile = {
   stale: cacheConfig.revalidateSeconds,
@@ -158,7 +155,11 @@ async function withOverrides(catalog: Catalog): Promise<Catalog> {
  *   «от таблицы» — база как зеркало Google Таблицы: перед показом подтягиваются изменения
  *                  таблицы (не чаще раза в 20 секунд), а правки и новинки из админки сохраняются;
  *   «от админки» — только база, таблица не влияет.
- * Если база недоступна или ещё не настроена — показываем саму таблицу.
+ * База ещё не настроена или точка в ней пустая (до первой синхронизации) — показываем саму таблицу.
+ *
+ * База не отвечает — ошибка (KeepLastVersion): витрина остаётся на последней удачной версии, а не
+ * откатывается на таблицу. В режиме «от админки» таблица устарела, а в режиме «от таблицы» в ней нет
+ * вкусов и правок, добавленных в админке, — в обоих случаях прошлая витрина честнее.
  */
 export async function getCatalog(storeId: string): Promise<Catalog> {
   "use cache";
@@ -169,24 +170,21 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
   if (!isDbConfigured() || process.env.CATALOG_SOURCE === "demo") return getSheetCatalog(store.id);
 
-  const settings = await loadSettings().catch((error) => {
-    console.error("[catalog] Настройки точек не прочитались:", error);
-    return undefined;
-  });
-  if (settings === undefined) {
-    // База не ответила. Точке «от таблицы» показываем саму таблицу — она главная. Точке «от админки»
-    // старую таблицу не показываем (там устаревшие наличие и цены): ошибка оставляет на сайте последнюю
-    // удачную версию витрины, пока база не вернётся.
-    // Показываем таблицу, только если точно известно, что она главная: иначе — ошибка, и ISR оставит прошлую витрину.
-    const known = await lastKnownSources().catch(() => null);
-    if (known?.[store.id] !== "sheet") throw new Error(`База не отвечает, режим «${store.title}» неизвестен — оставляю прошлую витрину`);
-    return getSheetCatalog(store.id);
+  const keepLast = (what: string) => (error: unknown) => {
+    console.error(`[catalog] «${store.title}»: ${what} — оставляю прошлую витрину:`, error);
+    throw new KeepLastVersion(`${what}: ${error instanceof Error ? error.message : String(error)}`);
+  };
+  const settings = await loadSettings().catch(keepLast("настройки точек не прочитались"));
+  const source = sourceOf(settings, store.id);
+
+  if (source === "db") {
+    const catalog = await loadDbCatalog(store).catch(keepLast("база не отвечает"));
+    // Перейти на админку можно только с товарами в базе, так что пустая точка здесь — сбой, а не пустой магазин.
+    if (!catalog) throw new KeepLastVersion(`«${store.title}» от админки, но в базе нет её товаров`);
+    return catalog;
   }
-  // Запоминаем режимы точек на случай, если база потом перестанет отвечать.
-  await lastKnownSources().catch(() => null);
-  // Старая схема без настроек — как раньше: база, если в ней есть товары точки.
-  if (settings === null) return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
-  if (sourceOf(settings, store.id) === "db") return (await loadDbCatalog(store)) ?? getSheetCatalog(store.id);
+  // Старая схема без настроек точек — база, если в ней есть товары точки, иначе таблица.
+  if (settings === null) return (await loadDbCatalog(store).catch(keepLast("база не отвечает"))) ?? getSheetCatalog(store.id);
   // Схема без колонок зеркала — таблица + быстрые правки.
   if (!settings.mirror) return withOverrides(await getSheetCatalog(store.id));
 
@@ -199,9 +197,7 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
   const fromDb = await loadDbCatalog(store, {
     snapshot: synced?.snapshot,
     ...(synced && { wholesale: { sheet: synced.sheets.wholesale } }),
-  }).catch((error) => {
-    console.error("[catalog] База недоступна, показываю таблицу:", error);
-    return null;
-  });
+  }).catch(keepLast("база не отвечает"));
+  // Точка ещё ни разу не синхронизировалась (пустая база) — показываем таблицу как есть.
   return fromDb ?? withOverrides(await getSheetCatalog(store.id));
 }

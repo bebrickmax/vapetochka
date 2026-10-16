@@ -69,19 +69,42 @@ describe("синхронизация: старая цена", () => {
     const { snapshot, sheet, lineIds, itemIds } = fixture(1, 1, { old_price: 18 });
     sheet[0].items[0].oldPrice = 20;
     const plan = planStock(sheet, itemIds, lineIds, snapshot, ctx());
-    expect(plan.upsert).toEqual([expect.objectContaining({ item_id: "item-0", price: 15, old_price: 20 })]);
+    expect(plan.upsert).toEqual([{ item_id: "item-0", store_id: "main", old_price: 20 }]);
 
     sheet[0].items[0].oldPrice = null; // скидку убрали
-    expect(planStock(sheet, itemIds, lineIds, snapshot, ctx()).upsert).toEqual([
-      expect.objectContaining({ price: 15, old_price: null }),
-    ]);
+    expect(planStock(sheet, itemIds, lineIds, snapshot, ctx()).upsert).toEqual([{ item_id: "item-0", store_id: "main", old_price: null }]);
   });
 
   it("не трогает цену, поставленную в админке", () => {
     const { snapshot, sheet, lineIds, itemIds } = fixture(1, 1, { price: 12, old_price: null });
     sheet[0].items[0].oldPrice = 20;
     const plan = planStock(sheet, itemIds, lineIds, snapshot, ctx());
-    expect(plan.upsert).toEqual([expect.objectContaining({ price: 12, old_price: 20, sheet_price: 15 })]);
+    // Пишется только старая цена: цена 12 из админки не попадает в запись и не может её затереть.
+    expect(plan.upsert).toEqual([{ item_id: "item-0", store_id: "main", old_price: 20 }]);
+  });
+});
+
+describe("синхронизация: кто изменил последним", () => {
+  it("прогон без изменений в таблице не трогает правки админки", () => {
+    // В админке: нет в наличии и цена 12; в таблице с прошлого раза всё то же («есть», 15).
+    const { snapshot, sheet, lineIds, itemIds } = fixture(1, 1, { in_stock: false, price: 12 });
+    expect(planStock(sheet, itemIds, lineIds, snapshot, ctx()).upsert).toEqual([]);
+  });
+
+  it("таблица поменяла цену — пишется только цена, наличие из админки остаётся", () => {
+    const { snapshot, sheet, lineIds, itemIds } = fixture(1, 1, { in_stock: false });
+    sheet[0].items[0].price = 16;
+    expect(planStock(sheet, itemIds, lineIds, snapshot, ctx()).upsert).toEqual([
+      { item_id: "item-0", store_id: "main", price: 16, old_price: null, sheet_price: 16 },
+    ]);
+  });
+
+  it("таблица поменяла наличие — пишется только наличие, цена из админки остаётся", () => {
+    const { snapshot, sheet, lineIds, itemIds } = fixture(1, 1, { price: 12 });
+    sheet[0].items[0].status = "out";
+    expect(planStock(sheet, itemIds, lineIds, snapshot, ctx()).upsert).toEqual([
+      { item_id: "item-0", store_id: "main", in_stock: false, sheet_status: "out" },
+    ]);
   });
 
   it("ничего не пишет, если всё совпадает", () => {

@@ -39,7 +39,6 @@ export function warmStorefront(request: Request) {
  */
 export function refreshStorefront(request: Request) {
   revalidateTag(cacheConfig.tag, "max");
-  revalidateTag(cacheConfig.settingsTag, "max");
   warmStorefront(request);
 }
 
