@@ -1,5 +1,6 @@
 # Проверка каждого изменения на серверах GitHub: линтер, тесты и сборка сайта.
 # Сборка идёт на демо-данных (CATALOG_SOURCE=demo) — ей не нужны ни таблица, ни база, ни секреты.
+# Итоги каждого шага видны в PR → Checks (короткие заметки «Линтер / Тесты / Сборка»).
 name: CI
 
 on:
@@ -11,6 +12,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -19,11 +23,17 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Линтер
-        run: npm run lint
+        run: |
+          npx eslint --max-warnings=0 . 2>&1 | tee lint.log
+          echo "::notice title=Линтер::ошибок и предупреждений нет"
       - name: Тесты
-        run: npm test
+        run: |
+          npm test -- --reporter=default 2>&1 | tee test.log
+          echo "::notice title=Тесты::$(sed 's/\x1b\[[0-9;]*m//g' test.log | grep -E '^ *(Test Files|Tests) ' | tr -s ' ' | paste -sd ';' -)"
       - name: Сборка
-        run: npm run build
+        run: |
+          npm run build 2>&1 | tee build.log
+          echo "::notice title=Сборка::$(sed 's/\x1b\[[0-9;]*m//g' build.log | grep -E '(Compiled|Generating static pages|/\[store\]|/main|/kamennaya-gorka)' | tr -s ' ' | paste -sd ';' - | cut -c1-900)"
         env:
           CATALOG_SOURCE: demo
           NEXT_TELEMETRY_DISABLED: "1"
