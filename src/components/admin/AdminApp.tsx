@@ -172,13 +172,16 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     [notify, onLoggedOut],
   );
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<AdminData | null> => {
     try {
-      setData(await api<AdminData>("/api/admin/catalog"));
+      const next = await api<AdminData>("/api/admin/catalog");
+      setData(next);
       setLoadError("");
+      return next;
     } catch (e) {
-      if (e instanceof UnauthorizedError) return onLoggedOut();
-      setLoadError(e instanceof Error ? e.message : "Не удалось загрузить каталог");
+      if (e instanceof UnauthorizedError) onLoggedOut();
+      else setLoadError(e instanceof Error ? e.message : "Не удалось загрузить каталог");
+      return null;
     }
   }, [onLoggedOut]);
 
@@ -203,15 +206,11 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     },
     [load, notify, handleError],
   );
-  // При открытии админки — сразу подтягиваем свежие изменения таблицы.
-  const autoSynced = useRef(false);
+  // При открытии админки: каталог, а затем — свежие изменения Google Таблицы.
+  const opened = useRef(false);
   useEffect(() => {
-    if (!data || autoSynced.current) return;
-    autoSynced.current = true;
-    if (data.schemaReady && Object.values(data.sources).includes("sheet")) void runSync(true);
-  }, [data, runSync]);
-
-  useEffect(() => {
+    if (opened.current) return; // в режиме разработки React запускает эффект дважды
+    opened.current = true;
     try {
       const saved = window.localStorage.getItem(STORE_KEY);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- точка запоминается в браузере
@@ -219,8 +218,11 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
     } catch {
       /* ignore */
     }
-    void load();
-  }, [load]);
+    void load().then((loaded) => {
+      if (loaded?.schemaReady && Object.values(loaded.sources).includes("sheet")) void runSync(true);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- один раз при открытии
+  }, []);
 
   /** Оптимистично: сразу меняем экран, затем сохраняем; при ошибке — откат. */
   const optimistic = useCallback(
@@ -485,7 +487,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             value={filters.brand}
             onChange={(e) => setFilter("brand", e.target.value)}
             aria-label="Бренд"
-            className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3 text-sm outline-none"
+            className="h-10 min-w-0 flex-1 rounded-full border border-line bg-surface px-3 text-base outline-none"
           >
             <option value="">Все бренды</option>
             {brandsOf(data, filters.categoryId).map((b) => (
@@ -498,7 +500,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             value={filters.status}
             onChange={(e) => setFilter("status", e.target.value as Filters["status"])}
             aria-label="Наличие"
-            className="h-10 rounded-full border border-line bg-surface px-3 text-sm outline-none"
+            className="h-10 rounded-full border border-line bg-surface px-3 text-base outline-none"
           >
             <option value="all">Любое наличие</option>
             <option value="in">В наличии</option>
@@ -867,13 +869,17 @@ function ItemRow({
 function InlineText({ value, onSave, label, className }: { value: string; onSave: (v: string) => void; label: string; className: string }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
+  // Enter сохраняет и закрывает поле, а закрытие может прислать ещё и blur — сохраняем один раз.
+  const done = useRef(false);
   if (!editing)
     return (
-      <button type="button" onClick={() => { setDraft(value); setEditing(true); }} className={className} aria-label={`${label}: ${value}. Изменить`}>
+      <button type="button" onClick={() => { done.current = false; setDraft(value); setEditing(true); }} className={className} aria-label={`${label}: ${value}. Изменить`}>
         {value}
       </button>
     );
   const commit = () => {
+    if (done.current) return;
+    done.current = true;
     setEditing(false);
     const next = draft.trim();
     if (next && next !== value) onSave(next);
@@ -886,10 +892,13 @@ function InlineText({ value, onSave, label, className }: { value: string; onSave
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") commit();
-        if (e.key === "Escape") setEditing(false);
+        if (e.key === "Escape") {
+          done.current = true;
+          setEditing(false);
+        }
       }}
       aria-label={label}
-      className="h-10 w-full rounded-xl border border-ink bg-bg px-3 text-[15px] outline-none"
+      className="h-10 w-full rounded-xl border border-ink bg-bg px-3 text-base outline-none"
     />
   );
 }
@@ -897,11 +906,12 @@ function InlineText({ value, onSave, label, className }: { value: string; onSave
 function InlinePrice({ value, highlight, onSave }: { value: number | null; highlight: boolean; onSave: (v: number | null) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  const done = useRef(false);
   if (!editing)
     return (
       <button
         type="button"
-        onClick={() => { setDraft(value === null ? "" : String(value)); setEditing(true); }}
+        onClick={() => { done.current = false; setDraft(value === null ? "" : String(value)); setEditing(true); }}
         className={`rounded-md py-0.5 font-semibold underline decoration-dotted underline-offset-2 ${highlight ? "text-ink" : ""}`}
         aria-label={`Цена ${formatPrice(value)}. Изменить`}
       >
@@ -909,6 +919,8 @@ function InlinePrice({ value, highlight, onSave }: { value: number | null; highl
       </button>
     );
   const commit = () => {
+    if (done.current) return;
+    done.current = true;
     setEditing(false);
     const next = draft.trim() === "" ? null : Number(draft.replace(",", "."));
     if (next !== null && (!Number.isFinite(next) || next < 0)) return;
@@ -923,10 +935,13 @@ function InlinePrice({ value, highlight, onSave }: { value: number | null; highl
       onBlur={commit}
       onKeyDown={(e) => {
         if (e.key === "Enter") commit();
-        if (e.key === "Escape") setEditing(false);
+        if (e.key === "Escape") {
+          done.current = true;
+          setEditing(false);
+        }
       }}
       aria-label="Цена, BYN"
-      className="h-9 w-24 rounded-lg border border-ink bg-bg px-2 text-sm text-ink outline-none"
+      className="h-9 w-24 rounded-lg border border-ink bg-bg px-2 text-base text-ink outline-none"
     />
   );
 }

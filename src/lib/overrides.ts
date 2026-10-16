@@ -87,10 +87,14 @@ export function applyOverrides(groups: ProductGroup[], overrides: SheetOverride[
 
       active.set(id, { stock: stockValid, price: priceValid });
       changed = true;
+      const price = priceValid ? num(o.price) : item.price;
+      // Цену подняли в админке выше старой цены из таблицы — зачёркивать уже нечего.
+      const keepOld = item.oldPrice !== undefined && price !== null && item.oldPrice > price;
       return {
         ...item,
         ...(stockValid && { status: (o.in_stock ? "in" : "out") as StockStatus }),
-        ...(priceValid && { price: num(o.price) }),
+        price,
+        oldPrice: keepOld ? item.oldPrice : undefined,
       };
     });
     return changed ? { ...group, items } : group;

@@ -234,11 +234,11 @@ input[type="search"]::-webkit-search-cancel-button {
   }
 }
 
+/* Без filter: blur — на старых айфонах размытие большого слоя в анимации заметно тормозит. */
 @keyframes intro-zoom {
   to {
     transform: scale(3.2);
     opacity: 0;
-    filter: blur(6px);
   }
 }
 
@@ -252,6 +252,19 @@ input[type="search"]::-webkit-search-cancel-button {
 /* Повторный заход за визит и «уменьшить движение» — без заставки. */
 .no-intro .intro {
   display: none;
+}
+
+/*
+ * Коснулись экрана — заставка быстро гаснет. Само это касание она забирает себе
+ * (иначе оно нажало бы невидимую кнопку под ней), следующие уже идут к сайту.
+ */
+.intro-skip .intro {
+  animation: intro-out 0.25s ease-out forwards;
+}
+
+/* Главная с запомненной точкой: пока открывается каталог, экран выбора не мелькает. */
+.vt-redirect body {
+  visibility: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {

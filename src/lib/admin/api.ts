@@ -1,5 +1,7 @@
 import { revalidateTag } from "next/cache";
+import { after } from "next/server";
 import { cacheConfig } from "@/config/site";
+import { stores } from "@/config/stores";
 import { DbError } from "@/lib/db/supabase";
 import { isAuthorized } from "./auth";
 
@@ -15,9 +17,26 @@ export class AdminError extends Error {
 export const json = (data: unknown, status = 200) =>
   Response.json(data, { status, headers: { "Cache-Control": "no-store" } });
 
-/** Сбрасывает кэш витрины: следующий посетитель сразу получит свежие данные. */
-export function refreshStorefront() {
-  revalidateTag(cacheConfig.tag, { expire: 0 });
+/**
+ * Сразу после ответа сам открывает страницы точек: они отдаются из кэша, а свежая
+ * версия собирается в фоне — через несколько секунд её видят все, и никто не ждёт.
+ */
+export function warmStorefront(request: Request) {
+  const origin = new URL(request.url).origin;
+  after(async () => {
+    await Promise.allSettled(
+      stores.map((store) => fetch(`${origin}/${store.id}`, { cache: "no-store", signal: AbortSignal.timeout(30_000) })),
+    );
+  });
+}
+
+/**
+ * Помечает витрину устаревшей после правки в админке. Не `{ expire: 0 }`: тогда первый покупатель
+ * после каждой правки ждал бы, пока заново прочитаются база и таблица (несколько секунд пустого экрана).
+ */
+export function refreshStorefront(request: Request) {
+  revalidateTag(cacheConfig.tag, "max");
+  warmStorefront(request);
 }
 
 type Handler<C> = (request: Request, context: C) => Promise<Response>;
@@ -28,7 +47,7 @@ export function adminRoute<C>(handler: Handler<C>, { mutates = true } = {}): Han
     if (!isAuthorized(request)) return json({ error: "Нужно войти в админку" }, 401);
     try {
       const response = await handler(request, context);
-      if (mutates && response.ok) refreshStorefront();
+      if (mutates && response.ok) refreshStorefront(request);
       return response;
     } catch (error) {
       if (error instanceof AdminError) return json({ error: error.message }, error.status);

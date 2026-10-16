@@ -38,6 +38,16 @@ export function isDesktopDevice(userAgent: string, maxTouchPoints: number): bool
   return true;
 }
 
+/**
+ * iPhone и iPad. Там ссылка https://t.me/… сама открывает приложение Telegram (universal link),
+ * а tg:// Safari встречает вопросом «Открыть в Telegram?» — и пока его читают, запасной переход
+ * уводит страницу на t.me. Поэтому на iOS — сразу t.me.
+ */
+export function isAppleMobile(userAgent: string, maxTouchPoints: number): boolean {
+  if (/iPhone|iPad|iPod/i.test(userAgent)) return true;
+  return /Macintosh/i.test(userAgent) && maxTouchPoints > 1; // iPadOS представляется как Mac
+}
+
 export function orderMessage(product: Product): string {
   const title = productTitle(product);
   if (product.status !== "in") {

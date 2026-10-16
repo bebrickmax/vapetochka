@@ -1,5 +1,7 @@
 /** Запросы админки к своему API. Ошибки — с понятным текстом из ответа сервера. */
 
+import { MAX_UPLOAD_BYTES, shrinkPhoto } from "./shrink";
+
 export class UnauthorizedError extends Error {}
 
 export async function api<T>(path: string, init: { method?: string; body?: unknown; form?: FormData } = {}): Promise<T> {
@@ -15,10 +17,12 @@ export async function api<T>(path: string, init: { method?: string; body?: unkno
   return data;
 }
 
-/** Загрузка фото в хранилище — возвращает ссылку. */
+/** Загрузка фото в хранилище (сначала уменьшается в браузере) — возвращает ссылку. */
 export async function uploadPhoto(file: File): Promise<string> {
+  const photo = await shrinkPhoto(file);
+  if (photo.size > MAX_UPLOAD_BYTES) throw new Error("Фото больше 4 МБ и не уменьшилось — выберите другое или сделайте скриншот");
   const form = new FormData();
-  form.append("file", file);
+  form.append("file", photo, photo === file ? file.name : "photo.jpg");
   const { url } = await api<{ url: string }>("/api/admin/upload", { form });
   return url;
 }

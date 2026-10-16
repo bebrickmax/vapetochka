@@ -136,6 +136,16 @@ google-apps-script/auto-update.gs
 HOW_TO_UPDATE.md       инструкция для владельца
 ```
 
+## Браузеры
+
+Next.js 16 по умолчанию собирает код только для Safari 16.4+ — на iPhone с iOS 15 и ранними iOS 16
+сайт открывался, но кнопки не работали. Поэтому в `package.json` задан `browserslist` (Safari/iOS 12+,
+Chrome 64+): сборка переводит новый синтаксис в совместимый. Стили Tailwind 4 требуют iOS 15.4+.
+Встроенный скрипт в `<head>` (`INTRO_SCRIPT` в `src/components/Intro.tsx`) сразу переводит с главной
+в запомненную точку, не дожидаясь загрузки сайта.
+
+Фото из хранилища Supabase уменьшаются на сервере (`sharp`, `src/app/api/photo/route.ts`) и кэшируются CDN.
+
 ## Деплой
 
 Проще всего — [Vercel](https://vercel.com): импортируйте репозиторий, добавьте переменные из

@@ -118,6 +118,12 @@ export async function remove(table: string, filter: Query): Promise<void> {
 
 export const PHOTO_BUCKET = "photos";
 
+/** Начало публичных ссылок на фото этого проекта (null — база не подключена). */
+export function publicPhotoPrefix(): string | null {
+  const { url } = env();
+  return url ? `${url}/storage/v1/object/public/${PHOTO_BUCKET}/` : null;
+}
+
 /** Загружает файл в публичный бакет и возвращает его постоянную ссылку. */
 export async function uploadPhoto(path: string, body: Blob | ArrayBuffer, contentType: string): Promise<string> {
   const safe = path.replace(/[^a-zA-Z0-9/._-]/g, "_");

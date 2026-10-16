@@ -3,7 +3,7 @@ import { demoSheets } from "@/data/demo-sheets";
 import { buildCatalog } from "@/lib/catalog";
 import { displayLine, flattenGroups, productTitle } from "@/lib/products";
 import { buildHaystack, matches, parseQuery } from "@/lib/search";
-import { isDesktopDevice, orderMessage, telegramLink } from "@/lib/telegram";
+import { isAppleMobile, isDesktopDevice, orderMessage, telegramLink } from "@/lib/telegram";
 
 const catalog = buildCatalog(demoSheets, "demo");
 const products = flattenGroups(catalog.groups);
@@ -83,6 +83,11 @@ describe("telegram", () => {
     expect(isDesktopDevice(android, 5)).toBe(false);
     // iPad с iPadOS притворяется Mac, но у него сенсорный экран.
     expect(isDesktopDevice(mac, 5)).toBe(false);
+    // На iPhone и iPad Telegram открывается ссылкой t.me.
+    expect(isAppleMobile(iphone, 5)).toBe(true);
+    expect(isAppleMobile(mac, 5)).toBe(true);
+    expect(isAppleMobile(mac, 0)).toBe(false);
+    expect(isAppleMobile(android, 5)).toBe(false);
   });
 
   it("asks about restock for unavailable items", () => {

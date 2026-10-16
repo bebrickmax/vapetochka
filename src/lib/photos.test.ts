@@ -22,8 +22,14 @@ describe("photos", () => {
   it("rounds sizes up to the allowed ones", () => {
     expect(sizedPhoto("/api/photo?store=main&gid=1&row=3&t=x", 300)).toBe("/api/photo?store=main&gid=1&row=3&t=x&s=360");
     expect(sizedPhoto("/api/photo?t=x", 5000)).toBe("/api/photo?t=x&s=1200");
-    expect(sizedPhoto("https://abc.supabase.co/storage/v1/object/public/photos/a.jpg", 360)).toBe(
-      "https://abc.supabase.co/storage/v1/object/public/photos/a.jpg",
+    expect(sizedPhoto("https://example.com/a.jpg", 360)).toBe("https://example.com/a.jpg");
+  });
+
+  it("serves storage photos resized through the site", () => {
+    const url = "https://abc.supabase.co/storage/v1/object/public/photos/import/AbC_12-x.png";
+    expect(sizedPhoto(url, 300)).toBe(`/api/photo?u=${encodeURIComponent(url)}&s=360`);
+    expect(sizedPhoto("https://abc.supabase.co/storage/v1/object/public/other/a.jpg", 360)).toBe(
+      "https://abc.supabase.co/storage/v1/object/public/other/a.jpg",
     );
   });
 });

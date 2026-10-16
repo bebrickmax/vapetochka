@@ -1,7 +1,7 @@
 "use client";
 
 import type { MouseEvent, ReactNode } from "react";
-import { isDesktopDevice, type TelegramLink } from "@/lib/telegram";
+import { isAppleMobile, isDesktopDevice, type TelegramLink } from "@/lib/telegram";
 
 const FALLBACK_DELAY_MS = 1200;
 
@@ -41,15 +41,22 @@ interface OpenOptions {
   silent?: boolean;
 }
 
+const onAppleMobile = () => isAppleMobile(navigator.userAgent, navigator.maxTouchPoints ?? 0);
+
 /**
  * Открывает Telegram по диплинку tg://resolve. Если приложение не открылось
  * (страница не потеряла фокус), переходит на веб-версию t.me.
+ * На iPhone и iPad — сразу t.me: она сама открывает приложение (см. isAppleMobile).
  *
  * На компьютере текст в ссылку не кладём (приложение покажет «%D0%9D…»):
  * чат открывается пустым, а текст копируется — его остаётся вставить.
  * Возвращает true, если текст нужно вставить вручную.
  */
 export function openTelegram(link: TelegramLink, { silent = false }: OpenOptions = {}): boolean {
+  if (onAppleMobile()) {
+    window.location.href = link.web;
+    return false;
+  }
   const desktop = isDesktopDevice(navigator.userAgent, navigator.maxTouchPoints ?? 0);
   const paste = desktop && !!link.text;
   const target = paste ? link.plain : link;
@@ -87,14 +94,20 @@ interface TelegramAnchorProps {
   "aria-label"?: string;
 }
 
+/**
+ * Ссылка на чат с менеджером. Адрес — https://t.me/… (на iPhone по нажатию сразу открывается
+ * приложение, и ссылка работает, даже если скрипты сайта не загрузились); на остальных
+ * устройствах нажатие идёт через openTelegram.
+ */
 export function TelegramAnchor({ link, className, children, ...rest }: TelegramAnchorProps) {
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+    if (onAppleMobile()) return; // обычный переход по t.me — самый надёжный способ на iOS
     event.preventDefault();
     openTelegram(link);
   };
   return (
-    <a href={link.app} onClick={onClick} className={className} rel="noopener" {...rest}>
+    <a href={link.web} onClick={onClick} className={className} rel="noopener" {...rest}>
       {children}
     </a>
   );

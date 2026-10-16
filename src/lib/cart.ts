@@ -69,7 +69,8 @@ export function cartItemFromProduct(product: Product, qty = 1): CartItem {
 }
 
 /** Меняет количество позиции; 0 и меньше — удаляет её из корзины. */
-export function setQty(items: CartItem[], { unavailable: _, ...item }: Omit<CartItem, "qty">, qty: number): CartItem[] {
+export function setQty(items: CartItem[], product: Omit<CartItem, "qty">, qty: number): CartItem[] {
+  const item = { id: product.id, title: product.title, price: product.price }; // без пометки «недоступна»
   const next = Math.min(Math.max(Math.trunc(qty), 0), MAX_QTY);
   const exists = items.some((i) => i.id === item.id);
   if (next === 0) return items.filter((i) => i.id !== item.id);
