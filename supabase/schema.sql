@@ -87,6 +87,10 @@ alter table store_settings add column if not exists sync_lock timestamptz;  -- �
 create unique index if not exists product_lines_sheet_key_uq on product_lines (category_id, sheet_key);
 create unique index if not exists items_sheet_key_uq on items (line_id, sheet_key);
 
+-- Метка «Новинка!» — ставится в админке у линейки или у отдельного вкуса. Синхронизация с таблицей её не трогает.
+alter table product_lines add column if not exists is_new boolean not null default false;
+alter table items         add column if not exists is_new boolean not null default false;
+
 -- updated_at обновляется сам.
 create or replace function touch_updated_at() returns trigger language plpgsql as $$
 begin
@@ -118,6 +122,11 @@ alter table sheet_overrides enable row level security;
 insert into storage.buckets (id, name, public)
 values ('photos', 'photos', true)
 on conflict (id) do update set public = true;
+
+-- Закрытый бакет для ежедневных резервных копий каталога (их пишет сам сайт, читать — только из Supabase).
+insert into storage.buckets (id, name, public)
+values ('backups', 'backups', false)
+on conflict (id) do update set public = false;
 
 -- Стартовые категории (импорт добавит недостающие сам).
 insert into categories (id, title, sort) values

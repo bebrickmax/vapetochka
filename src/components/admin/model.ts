@@ -18,6 +18,8 @@ export interface AdminData {
   syncedAt: Record<string, string | null>;
   /** В базе есть всё для синхронизации с таблицей (schema.sql обновлён). */
   schemaReady: boolean;
+  /** Что умеет база: newBadge — есть колонка метки «Новинка». */
+  features?: { newBadge: boolean };
 }
 
 /**
@@ -68,7 +70,7 @@ export interface Filters {
   query: string;
   categoryId: string; // "" — все
   brand: string; // "" — все
-  status: "all" | "in" | "out";
+  status: "all" | "in" | "out" | "new";
 }
 
 function commonPrice(items: ItemView[]): number | null {
@@ -117,6 +119,7 @@ export function buildView(data: AdminData, filters: Filters): LineView[] {
     const visible = all.filter((v) => {
       if (filters.status === "in" && !v.stock.in_stock) return false;
       if (filters.status === "out" && v.stock.in_stock) return false;
+      if (filters.status === "new" && !line.is_new && !v.item.is_new) return false;
       if (!searching || lineMatches) return true;
       return matches(normalize(`${lineText} ${v.item.title} ${v.item.variant ?? ""}`), query);
     });

@@ -110,6 +110,11 @@ export interface SyncContext {
   force: boolean;
   /** Только добавить новое, существующее не трогать. */
   onlyNew: boolean;
+  /**
+   * Таблица могла прочитаться не целиком (список листов взят из запасного, потому что Google
+   * не отдал настоящий): обновляем и добавляем, но ничего не удаляем.
+   */
+  partial?: boolean;
 }
 
 /** Строка, которой нужно фото из таблицы (копирование — снаружи, с лимитом). */
@@ -191,6 +196,8 @@ export function planLines(sheet: SheetLine[], snapshot: DbSnapshot, ctx: SyncCon
       continue;
     }
     plan.resolved.set(ref, existing.id);
+    // Фото, которое ещё не докачалось, нужно и в режиме «только новые».
+    if (!existing.image_url && line.image) plan.photos.push({ kind: "line", ref: existing.id, url: line.image });
     if (ctx.onlyNew && !adopted) continue;
 
     const next: DbLine = {
@@ -211,7 +218,6 @@ export function planLines(sheet: SheetLine[], snapshot: DbSnapshot, ctx: SyncCon
       next.sort !== existing.sort
     )
       plan.update.push(next);
-    if (!existing.image_url && line.image) plan.photos.push({ kind: "line", ref: existing.id, url: line.image });
   }
   return plan;
 }
@@ -273,6 +279,7 @@ export function planItems(
         continue;
       }
       plan.resolved.set(ref, existing.id);
+      if (!existing.image_url && item.image) plan.photos.push({ kind: "item", ref: existing.id, url: item.image });
       if (ctx.onlyNew && !adopted) continue;
       const next: DbItem = {
         ...existing,
@@ -283,7 +290,6 @@ export function planItems(
       };
       if (adopted || next.title !== existing.title || next.variant !== existing.variant || next.sort !== existing.sort)
         plan.update.push(next);
-      if (!existing.image_url && item.image) plan.photos.push({ kind: "item", ref: existing.id, url: item.image });
     }
   }
   return plan;
@@ -299,6 +305,8 @@ export interface StockPlan {
   updated: number;
   /** Убирать подозрительно много — пропускаем удаление (таблица могла прочитаться не целиком). */
   removalSkipped: boolean;
+  /** Почему пропущено: «mass» — уходит слишком много, «partial» — список листов был запасной. */
+  skipReason?: "mass" | "partial";
 }
 
 export function planStock(
@@ -361,6 +369,11 @@ export function planStock(
         Object.assign(next, { price: item.price, old_price: item.oldPrice, sheet_price: item.price });
         changed = true;
       }
+      // Старую (зачёркнутую) цену меняют только в таблице — в админке её нет, поэтому она всегда как в таблице.
+      if (num(next.old_price) !== item.oldPrice) {
+        next.old_price = item.oldPrice;
+        changed = true;
+      }
       if (changed) {
         plan.upsert.push(next);
         plan.updated++;
@@ -373,7 +386,8 @@ export function planStock(
     // (кроме первой синхронизации: тогда в базе только старый перенос из таблицы).
     const tracked = [...current.values()].filter((s) => s.sheet_status || ctx.first);
     const gone = tracked.filter((s) => !inSheet.has(s.item_id)).map((s) => s.item_id);
-    if (gone.length > 20 && gone.length > tracked.length * 0.5) plan.removalSkipped = true;
+    if (gone.length > 0 && ctx.partial) Object.assign(plan, { removalSkipped: true, skipReason: "partial" });
+    else if (gone.length > 20 && gone.length > tracked.length * 0.5) Object.assign(plan, { removalSkipped: true, skipReason: "mass" });
     else plan.remove = gone;
   }
   return plan;
@@ -401,6 +415,8 @@ export function planCleanup(
   keep: { lines: Set<string>; items: Set<string> },
   ctx: SyncContext,
 ) {
+  // Таблица прочиталась не целиком — «пропавшее» могло просто не скачаться.
+  if (ctx.partial) return { items: [], lines: [] };
   const removed = new Set(removedStock.itemIds);
   const stockLeft = new Set<string>();
   for (const s of snapshot.stock) {

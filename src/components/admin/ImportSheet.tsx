@@ -24,7 +24,8 @@ export function ImportSheet({
   data: AdminData;
   onClose: () => void;
   onDone: () => void;
-  onSwitch: (source: "sheet" | "db", storeId: string) => void | Promise<void>;
+  /** Возвращает текст ошибки, если переключить не получилось. */
+  onSwitch: (source: "sheet" | "db", storeId: string) => Promise<string | null>;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [log, setLog] = useState<string[]>([]);
@@ -65,7 +66,8 @@ export function ImportSheet({
   const switchTo = async (source: "sheet" | "db", storeId: string) => {
     setBusy(`switch-${storeId}`);
     try {
-      await onSwitch(source, storeId);
+      const error = await onSwitch(source, storeId);
+      if (error) setLog((l) => [`✗ ${error}`, ...l]);
     } finally {
       setBusy(null);
     }
@@ -100,8 +102,9 @@ export function ImportSheet({
               {sheetMode ? (
                 <>
                   <p className="text-sm leading-relaxed text-ink/80">
-                    <b>Сейчас: от Google Таблицы.</b> База — копия таблицы, обновляется сама каждую минуту
-                    {synced ? ` (последний раз — ${synced})` : ""}. Вкусы, линейки, наличие и цены можно менять и здесь.
+                    <b>Сейчас: от Google Таблицы.</b> База — копия таблицы, обновляется сама: после правки таблицы и по
+                    расписанию каждые 10 минут{synced ? ` (последний раз — ${synced})` : ""}. Вкусы, линейки, наличие и цены
+                    можно менять и здесь.
                   </p>
                   <SecondaryButton onClick={() => sync(store.id)} disabled={!!busy}>
                     {busy === `sync-${store.id}` ? "Синхронизирую…" : "Обновить из таблицы сейчас"}
@@ -110,8 +113,9 @@ export function ImportSheet({
                     {busy === `switch-${store.id}` ? "Переключаю…" : "Перейти на админку"}
                   </PrimaryButton>
                   <p className="text-xs leading-relaxed text-muted">
-                    Переход мгновенный: всё уже в админке. Перед переключением подтянутся последние изменения таблицы, а
-                    дальше таблица на сайт не влияет. Вернуться можно в любой момент.
+                    Всё уже в админке. Перед переключением подтянутся последние изменения таблицы и докачаются фото — если
+                    фото много, кнопку попросит нажать ещё раз. Дальше таблица на сайт не влияет (кроме листа «ОПТ»).
+                    Вернуться можно в любой момент.
                   </p>
                 </>
               ) : (

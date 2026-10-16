@@ -48,4 +48,8 @@ export const cacheConfig = {
   tag: "catalog",
   /** Сырые данные Google Таблиц — сбрасываются при правке таблицы. */
   sheetsTag: "sheets",
+  /** Лист «ОПТ» — свой кэш: при сбое Google остаётся прошлый. */
+  wholesaleTag: "wholesale",
+  /** Режимы точек («от таблицы» / «от админки») с прошлого удачного чтения базы. */
+  settingsTag: "settings",
 } as const;

@@ -1,6 +1,7 @@
 "use client";
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { siteConfig } from "@/config/site";
 import type { StoreInfo } from "@/config/stores";
 import { formatUpdatedAt, pluralize } from "@/lib/format";
@@ -49,6 +50,29 @@ function groupBy(entries: LineEntry[], keyOf: (g: ProductGroup) => string): [str
     else map.set(key, [entry]);
   }
   return [...map];
+}
+
+/**
+ * Освежает данные витрины без перезагрузки: когда вкладка снова на экране и раз в 5 минут.
+ * router.refresh() подтягивает свежую страницу с сервера и сохраняет состояние экрана
+ * (поиск, вкладку, корзину). Не чаще раза в 30 секунд и не во время поиска/корзины.
+ */
+function useFreshCatalog(busy: boolean) {
+  const router = useRouter();
+  useEffect(() => {
+    let last = Date.now();
+    const refresh = () => {
+      if (document.visibilityState !== "visible" || busy || Date.now() - last < 30_000) return;
+      last = Date.now();
+      router.refresh();
+    };
+    const timer = window.setInterval(refresh, 5 * 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [router, busy]);
 }
 
 export function Catalog({ catalog, store }: { catalog: CatalogData; store: StoreInfo }) {
@@ -236,6 +260,7 @@ export function Catalog({ catalog, store }: { catalog: CatalogData; store: Store
 
   const showPromotions = activeTab === PROMO;
   const scrolled = useScrolledPast(900);
+  useFreshCatalog(searching);
 
   return (
     <CartProvider storeId={store.id} live={liveProducts}>

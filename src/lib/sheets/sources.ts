@@ -34,31 +34,39 @@ async function getText(url: string, what: string): Promise<string> {
   return text;
 }
 
+export interface TabList {
+  tabs: SheetTab[];
+  /** Настоящий список Google не отдал — взят запасной из настроек точки (в нём может не быть новых листов). */
+  fallback: boolean;
+}
+
 /**
  * Все листы таблицы по порядку (название + gid).
  * С ключом — через API (скрытые листы пропускаются), без ключа — из
  * веб-просмотра таблицы, а если он не ответил — из запасного списка точки.
  */
-export async function listTabs(store: Store): Promise<SheetTab[]> {
+export async function listTabs(store: Store): Promise<TabList> {
   const { apiKey } = sheetsConfig;
   if (apiKey) {
     const meta = await getJson<{ sheets: { properties: SheetProperties }[] }>(
       `${API_BASE}/${store.spreadsheetId}?key=${encodeURIComponent(apiKey)}&fields=sheets.properties(title,sheetId,index,hidden)`,
     );
-    return meta.sheets
+    const tabs = meta.sheets
       .map((s) => s.properties)
       .filter((p) => !p.hidden)
       .sort((a, b) => a.index - b.index)
       .map((p) => ({ title: p.title, gid: String(p.sheetId) }));
+    return { tabs, fallback: false };
   }
   try {
     const html = await getText(`${DOCS_BASE}/${store.spreadsheetId}/htmlview`, "список листов");
     const tabs = parseTabList(html);
-    if (tabs.length > 0) return tabs;
+    if (tabs.length > 0) return { tabs, fallback: false };
+    console.warn(`[catalog] В веб-просмотре «${store.title}» не нашлось листов, беру запасной список`);
   } catch (error) {
     console.warn(`[catalog] Список листов «${store.title}» не прочитан, беру запасной:`, error);
   }
-  return [...store.fallbackTabs];
+  return { tabs: [...store.fallbackTabs], fallback: true };
 }
 
 /** Содержимое листов (значения ячеек). */
@@ -111,6 +119,11 @@ export interface StoreSheets {
   sheets: RawSheet[];
   /** Лист оптовых цен, если он есть. */
   wholesale?: RawSheet;
+  /**
+   * Список листов запасной (Google его не отдал): часть листов могла не прочитаться,
+   * поэтому синхронизация в этот раз ничего не удаляет из базы.
+   */
+  partial?: boolean;
 }
 
 async function loadWholesaleTab(store: Store, tab: SheetTab | undefined): Promise<RawSheet | undefined> {
@@ -130,23 +143,24 @@ const findWholesaleTab = (tabs: SheetTab[]) => {
   return title ? tabs.find((t) => sameTitle(t.title, title)) : undefined;
 };
 
-/** Только лист «ОПТ» (когда каталог уже берётся из базы). Ошибки не пробрасывает. */
-export async function fetchWholesaleSheet(store: Store): Promise<RawSheet | undefined> {
-  try {
-    return await loadWholesaleTab(store, findWholesaleTab(await listTabs(store)));
-  } catch (error) {
-    console.warn(`[catalog] ОПТ «${store.title}» недоступен:`, error);
-    return undefined;
-  }
+/**
+ * Только лист «ОПТ» (когда каталог уже берётся из базы). Если Google не ответил — ошибка
+ * (так в кэше остаётся прошлый ОПТ), null — такого листа в таблице нет.
+ */
+export async function fetchWholesaleSheet(store: Store): Promise<RawSheet | null> {
+  const tab = findWholesaleTab((await listTabs(store)).tabs);
+  if (!tab) return null;
+  const [rows] = await fetchRows(store, [tab]);
+  return withImages(store, tab, rows);
 }
 
 /** Все данные таблицы точки: листы каталога с фото и лист «ОПТ». */
 export async function fetchStoreSheets(store: Store): Promise<StoreSheets> {
-  const tabs = await listTabs(store);
+  const { tabs, fallback } = await listTabs(store);
   const wholesaleTab = findWholesaleTab(tabs);
   const catalogTabs = tabs.filter((t) => !isExcluded(t.title) && t !== wholesaleTab);
 
   const [rows, wholesale] = await Promise.all([fetchRows(store, catalogTabs), loadWholesaleTab(store, wholesaleTab)]);
   const sheets = await Promise.all(catalogTabs.map((tab, i) => withImages(store, tab, rows[i])));
-  return { sheets, ...(wholesale && { wholesale }) };
+  return { sheets, ...(wholesale && { wholesale }), ...(fallback && { partial: true }) };
 }

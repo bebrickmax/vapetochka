@@ -4,14 +4,20 @@ import { useState } from "react";
 import type { DbItem, DbLine } from "@/lib/db/types";
 import { brandsOf, sheetDiff, type AdminData, type LineView } from "./model";
 import { PhotoField } from "./PhotoField";
-import { Field, inputClass, PrimaryButton, SecondaryButton, Sheet, StoreChecks } from "./ui";
+import { Field, inputClass, NewBadgeRow, PrimaryButton, SecondaryButton, Sheet, StoreChecks } from "./ui";
 
 /** Действия, которые выполняет AdminApp (оптимистично + запрос к API). */
 export interface AdminActions {
   setStock: (itemIds: string[], patch: { inStock?: boolean; price?: number | null }) => Promise<boolean>;
-  updateItem: (id: string, patch: { title?: string; variant?: string | null; imageUrl?: string | null; stores?: string[] }) => Promise<boolean>;
+  updateItem: (
+    id: string,
+    patch: { title?: string; variant?: string | null; imageUrl?: string | null; stores?: string[]; isNew?: boolean },
+  ) => Promise<boolean>;
   deleteItem: (id: string) => Promise<boolean>;
-  updateLine: (id: string, patch: { name?: string; brand?: string | null; note?: string | null; categoryId?: string; imageUrl?: string | null }) => Promise<boolean>;
+  updateLine: (
+    id: string,
+    patch: { name?: string; brand?: string | null; note?: string | null; categoryId?: string; imageUrl?: string | null; isNew?: boolean },
+  ) => Promise<boolean>;
   deleteLine: (id: string) => Promise<boolean>;
   /** Вкусы по алфавиту: в указанных линейках или (без аргумента) во всех. */
   sortLines: (lineIds?: string[]) => Promise<boolean>;
@@ -97,6 +103,14 @@ export function LineSheet({
         </PrimaryButton>
       }
     >
+      {data.features?.newBadge && (
+        <NewBadgeRow
+          checked={!!line.is_new}
+          onChange={(isNew) => void actions.updateLine(line.id, { isNew })}
+          hint="Плашка на карточке линейки на сайте — во всех точках."
+        />
+      )}
+
       <section className="space-y-2 rounded-2xl border border-line p-3">
         <p className="text-sm font-bold">Все вкусы в точке «{storeTitle}» ({ids.length})</p>
         <div className="grid grid-cols-2 gap-2">
@@ -251,6 +265,13 @@ export function ItemSheet({
             {stores.length === 0 && <p className="text-xs text-danger">Выберите хотя бы одну точку</p>}
           </div>
         </>
+      )}
+      {data.features?.newBadge && (
+        <NewBadgeRow
+          checked={!!item.is_new}
+          onChange={(isNew) => void actions.updateItem(item.id, { isNew })}
+          hint="Метка «Новинка» у этого вкуса на сайте."
+        />
       )}
       <PhotoField value={image} onChange={setImage} />
       {!locked && (

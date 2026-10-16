@@ -67,13 +67,17 @@ function LineCardBase({ group, visible, category, expanded = false, hideFamily =
   const shown = collapsible ? visible.slice(0, COLLAPSED_ROWS) : visible;
 
   return (
-    <article className="overflow-hidden rounded-[26px] border border-line bg-surface">
+    <article className={`overflow-hidden rounded-[26px] border border-line bg-surface ${group.isNew ? "card-new" : ""}`}>
       <header className="flex gap-4 p-4">
-        <ProductPhoto
-          src={group.image}
-          alt={[group.brand, group.line].filter(Boolean).join(" ")}
-          className="h-[118px] w-[92px] shrink-0"
-        />
+        {/* Наклейка «Новинка» — в углу фото: не закрывает ни название, ни цену. */}
+        <div className="relative shrink-0 overflow-visible">
+          <ProductPhoto
+            src={group.image}
+            alt={[group.brand, group.line].filter(Boolean).join(" ")}
+            className="h-[118px] w-[92px]"
+          />
+          {group.isNew && <span className="badge-new badge-new-sticker">✨ Новинка</span>}
+        </div>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
@@ -189,9 +193,10 @@ function ItemRow({ group, itemIndex, showPrice, continuation, photo, photoSlot }
               )}
               {item.name}
             </p>
-            {item.variant && (
-              <div className="mt-1">
-                <Chip>{item.variant}</Chip>
+            {(item.variant || (item.isNew && !group.isNew)) && (
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {item.isNew && !group.isNew && <span className="badge-new">✨ Новинка</span>}
+                {item.variant && <Chip>{item.variant}</Chip>}
               </div>
             )}
             {item.description && <p className="mt-0.5 text-[13px] leading-snug text-muted">{item.description}</p>}
