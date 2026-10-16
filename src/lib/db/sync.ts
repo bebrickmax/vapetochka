@@ -69,7 +69,8 @@ export async function setStoreSource(storeId: string, source: StoreSource): Prom
 // ─── Блокировка ─────────────────────────────────────────────────────────────
 
 const iso = (d: Date) => d.toISOString().replace(/\.\d{3}Z$/, "Z");
-const LOCK_SECONDS = 240;
+/** Дольше, чем может работать функция синхронизации (maxDuration 300 с), — чтобы две не шли сразу. */
+const LOCK_SECONDS = 330;
 
 async function acquire(storeId: string, minIntervalSeconds: number): Promise<boolean> {
   await insert("store_settings", { store_id: storeId, source: "sheet" }, { onConflict: "store_id", ignoreDuplicates: true });
@@ -130,15 +131,25 @@ const stockRow = (s: DbStock) => ({
   sheet_price: s.sheet_price ?? null,
 });
 
-/** Копирует фото с лимитом на один запуск (остальные — в следующие). */
-async function copyWithBudget(needs: PhotoNeed[], budget: { left: number; copied: number; failed: number; pending: number }) {
+interface PhotoBudget {
+  left: number;
+  copied: number;
+  failed: number;
+  pending: number;
+}
+
+/**
+ * Копирует фото с лимитом на один запуск (остальные — в следующие). После deadline новые фото
+ * не начинаются — чтобы синхронизация успела записать остальное, пока функцию не остановили.
+ */
+async function copyWithBudget(needs: PhotoNeed[], budget: PhotoBudget, deadline: number) {
   const take = needs.slice(0, Math.max(0, budget.left));
   budget.pending += needs.length - take.length;
   budget.left -= take.length;
   const result = new Map<string, string>();
   let next = 0;
   const worker = async () => {
-    while (next < take.length) {
+    while (next < take.length && Date.now() < deadline) {
       const need = take[next++];
       const url = await copyPhoto(need.url);
       if (url) {
@@ -148,6 +159,7 @@ async function copyWithBudget(needs: PhotoNeed[], budget: { left: number; copied
     }
   };
   await Promise.all(Array.from({ length: Math.min(6, take.length) }, worker));
+  budget.pending += take.length - next; // не успели — в следующий раз
   return result;
 }
 
@@ -157,7 +169,7 @@ export interface SyncReport {
   storeId: string;
   lines: { created: number; updated: number; removed: number };
   items: { created: number; updated: number; removed: number };
-  stock: { added: number; updated: number; removed: number; removalSkipped: boolean };
+  stock: { added: number; updated: number; removed: number; removalSkipped: boolean; skipReason?: "mass" | "partial" };
   photos: { copied: number; failed: number; pending: number };
   first: boolean;
   changed: boolean;
@@ -178,6 +190,8 @@ export interface SyncOptions {
   onlyNew?: boolean;
   /** Сколько фото скопировать за раз (остальные — в следующие запуски). */
   maxPhotos?: number;
+  /** Сколько секунд от начала синхронизации можно тратить на фото (по умолчанию 120). */
+  photoSeconds?: number;
   /** Не запускать, если последняя синхронизация была недавно (секунды). */
   minIntervalSeconds?: number;
 }
@@ -220,8 +234,10 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
     first: !settings?.rows.get(storeId)?.synced_at,
     force: !!options.force,
     onlyNew: !!options.onlyNew,
+    partial: !!sheets.partial,
   };
-  const budget = { left: options.maxPhotos ?? 10, copied: 0, failed: 0, pending: 0 };
+  const budget: PhotoBudget = { left: options.maxPhotos ?? 10, copied: 0, failed: 0, pending: 0 };
+  const photoDeadline = Date.now() + (options.photoSeconds ?? 120) * 1000;
   const report: SyncReport = {
     storeId,
     lines: { created: 0, updated: 0, removed: 0 },
@@ -239,7 +255,7 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
 
   // 2. Линейки.
   const lp = planLines(lines, snapshot, ctx);
-  const linePhotos = await copyWithBudget(lp.photos, budget);
+  const linePhotos = await copyWithBudget(lp.photos, budget, photoDeadline);
   const created = await insertBatched<DbLine>(
     "product_lines",
     lp.create.map((c) => ({ ...c.row, image_url: linePhotos.get(c.ref) ?? null })),
@@ -262,7 +278,7 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
 
   // 3. Позиции.
   const ip = planItems(lines, lineIds, snapshot, ctx);
-  const itemPhotos = await copyWithBudget(ip.photos, budget);
+  const itemPhotos = await copyWithBudget(ip.photos, budget, photoDeadline);
   const createdItems = await insertBatched<DbItem>(
     "items",
     ip.create.map((c) => ({ ...c.row, image_url: itemPhotos.get(c.ref) ?? null })),
@@ -287,7 +303,14 @@ export async function syncFromSheets(storeId: string, sheets: StoreSheets, optio
   const sp = planStock(lines, itemIds, lineIds, snapshot, ctx);
   await insertBatched("item_stock", sp.upsert.map(stockRow), "item_id,store_id");
   if (sp.remove.length) await removeIn("item_stock", "item_id", sp.remove, { store_id: `eq.${storeId}` });
-  report.stock = { added: sp.added, updated: sp.updated, removed: sp.remove.length, removalSkipped: sp.removalSkipped };
+  report.stock = {
+    added: sp.added,
+    updated: sp.updated,
+    removed: sp.remove.length,
+    removalSkipped: sp.removalSkipped,
+    ...(sp.skipReason && { skipReason: sp.skipReason }),
+  };
+  if (sp.removalSkipped) console.warn(`[sync] «${store.title}»: удаление пропущено (${sp.skipReason}) — таблица могла прочитаться не целиком`);
 
   // 5. Уборка: позиции и линейки из таблицы, которые больше нигде не продаются.
   const cleanup = planCleanup(snapshot, { storeId, itemIds: sp.remove }, { lines: new Set(lineIds.values()), items: new Set(itemIds.values()) }, ctx);

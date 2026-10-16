@@ -14,6 +14,8 @@ export interface ProductItem {
   status: StockStatus;
   /** Фото позиции, если в таблице у неё своя картинка (например, у испарителей). */
   image?: string;
+  /** Новый вкус — метка «Новинка!» из админки. */
+  isNew?: boolean;
 }
 
 /** Линейка/группа товаров: заголовок + цена + список позиций. */
@@ -38,6 +40,8 @@ export interface ProductGroup {
   note?: string;
   /** Фото линейки — картинка из колонки A таблицы. */
   image?: string;
+  /** Новая линейка — метка «Новинка!» из админки. */
+  isNew?: boolean;
   items: ProductItem[];
 }
 

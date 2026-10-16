@@ -39,10 +39,18 @@ function headers(extra: Record<string, string> = {}): Record<string, string> {
   return { ...authHeaders(env().key), ...extra };
 }
 
+/** Дольше база не отвечает — считаем, что она недоступна (иначе зависшая база вешала бы и сайт). */
+const TIMEOUT_MS = 20_000;
+
 async function request(path: string, init: RequestInit & { headers?: Record<string, string> } = {}) {
   const { url } = env();
   if (!isDbConfigured()) throw new DbError("База данных не подключена (SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)", 503);
-  const res = await fetch(`${url}${path}`, { ...init, headers: headers(init.headers), cache: "no-store" });
+  const res = await fetch(`${url}${path}`, {
+    ...init,
+    headers: headers(init.headers),
+    cache: "no-store",
+    signal: init.signal ?? AbortSignal.timeout(TIMEOUT_MS),
+  });
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     throw new DbError(`Supabase ${res.status}: ${body.slice(0, 400)}`, res.status);
@@ -122,6 +130,34 @@ export const PHOTO_BUCKET = "photos";
 export function publicPhotoPrefix(): string | null {
   const { url } = env();
   return url ? `${url}/storage/v1/object/public/${PHOTO_BUCKET}/` : null;
+}
+
+/** Файл в бакете (закрытом или публичном): загрузить или заменить. */
+export async function storageUpload(bucket: string, path: string, body: Blob | ArrayBuffer | Uint8Array, contentType: string): Promise<void> {
+  await request(`/storage/v1/object/${bucket}/${path}`, {
+    method: "POST",
+    headers: { "Content-Type": contentType, "x-upsert": "true" },
+    body: body as BodyInit,
+  });
+}
+
+/** Имена файлов в корне бакета, новые первыми. */
+export async function storageList(bucket: string, limit = 100): Promise<string[]> {
+  const res = await request(`/storage/v1/object/list/${bucket}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: "", limit, offset: 0, sortBy: { column: "name", order: "desc" } }),
+  });
+  return ((await res.json()) as { name: string; id: string | null }[]).filter((f) => f.id !== null).map((f) => f.name);
+}
+
+export async function storageRemove(bucket: string, paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+  await request(`/storage/v1/object/${bucket}`, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ prefixes: paths }),
+  });
 }
 
 /** Загружает файл в публичный бакет и возвращает его постоянную ссылку. */

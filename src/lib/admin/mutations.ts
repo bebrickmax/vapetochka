@@ -1,5 +1,5 @@
 import { getStore, storeInfos } from "@/config/stores";
-import { insert, inList, remove, selectAll, update } from "@/lib/db/supabase";
+import { DbError, insert, inList, remove, selectAll, update } from "@/lib/db/supabase";
 import type { DbItem, DbLine, DbStock } from "@/lib/db/types";
 import { loadSettings, sourceOf } from "@/lib/db/sync";
 import { alphabeticalOrderByLine, compareTitles } from "@/lib/sort";
@@ -53,7 +53,26 @@ function url(value: unknown): string | null {
   return v;
 }
 
+function flag(value: unknown, field: string): boolean {
+  if (typeof value !== "boolean") throw new AdminError(`Поле «${field}» должно быть да/нет`);
+  return value;
+}
+
 const has = (obj: object, key: string) => Object.prototype.hasOwnProperty.call(obj, key);
+
+export const NEW_BADGE_SCHEMA_HINT =
+  "Чтобы работала метка «Новинка», обновите базу: Supabase → SQL Editor → вставьте supabase/schema.sql → Run.";
+
+/** Запись с меткой «Новинка» в базу без колонки is_new — понятная подсказка вместо «база не ответила». */
+async function withNewBadge<T>(write: () => Promise<T>, usesBadge: boolean): Promise<T> {
+  try {
+    return await write();
+  } catch (error) {
+    if (usesBadge && error instanceof DbError && error.status === 400 && /is_new/.test(error.message))
+      throw new AdminError(NEW_BADGE_SCHEMA_HINT, 409);
+    throw error;
+  }
+}
 
 // ─── Что пришло из Google Таблицы ───────────────────────────────────────────
 
@@ -167,9 +186,11 @@ export async function updateItem(id: string, body: Record<string, unknown>): Pro
   if (has(body, "title")) patch.title = text(body.title, "Название", { required: true });
   if (has(body, "variant")) patch.variant = text(body.variant, "Вариант");
   if (has(body, "imageUrl")) patch.image_url = url(body.imageUrl);
+  // «Новинка» — своя метка админки, её можно ставить и позициям из таблицы.
+  if (has(body, "isNew")) patch.is_new = flag(body.isNew, "Новинка");
 
   let item: DbItem | undefined;
-  if (Object.keys(patch).length) [item] = await update<DbItem>("items", { id: `eq.${itemId}` }, patch);
+  if (Object.keys(patch).length) [item] = await withNewBadge(() => update<DbItem>("items", { id: `eq.${itemId}` }, patch), "is_new" in patch);
   else [item] = await selectAll<DbItem>("items", { id: `eq.${itemId}` });
   if (!item) throw new AdminError("Позиция не найдена", 404);
   if (patch.title !== undefined || patch.variant !== undefined) await arrange(item.line_id, [item.id]);
@@ -208,11 +229,12 @@ export async function updateLine(id: string, body: Record<string, unknown>): Pro
   if (has(body, "note")) patch.note = text(body.note, "Пояснение");
   if (has(body, "categoryId")) patch.category_id = text(body.categoryId, "Категория", { required: true });
   if (has(body, "imageUrl")) patch.image_url = url(body.imageUrl);
+  if (has(body, "isNew")) patch.is_new = flag(body.isNew, "Новинка");
   if (Object.keys(patch).length === 0) throw new AdminError("Нет изменений");
   const fromSheet = ["name", "brand", "section", "note", "category_id"].some((k) => k in patch);
   if (fromSheet && (await isLineLocked(uuid(id))))
     throw new AdminError("Эта линейка из Google Таблицы — название, бренд, категория и пояснение меняются в таблице. Здесь можно менять фото, наличие и цены.");
-  const [line] = await update<DbLine>("product_lines", { id: `eq.${uuid(id)}` }, patch);
+  const [line] = await withNewBadge(() => update<DbLine>("product_lines", { id: `eq.${uuid(id)}` }, patch), "is_new" in patch);
   if (!line) throw new AdminError("Линейка не найдена", 404);
   return line;
 }
@@ -235,6 +257,8 @@ export interface CreateRequest {
   price?: number | string | null;
   stores: string[];
   inStock?: boolean;
+  /** Метка «Новинка!»: новой линейке — на всю линейку, в существующую — на добавленные вкусы. */
+  isNew?: boolean;
 }
 
 export async function createProducts(body: CreateRequest): Promise<{ line: DbLine; items: DbItem[] }> {
@@ -247,6 +271,9 @@ export async function createProducts(body: CreateRequest): Promise<{ line: DbLin
   const itemPrice = price(body.price);
   const variant = text(body.variant, "Вариант");
   const inStock = body.inStock !== false;
+  const isNew = body.isNew === true;
+  // Колонку пишем, только когда метка нужна, — так добавление работает и в базе без колонки is_new.
+  const badge = isNew ? { is_new: true } : {};
 
   let line: DbLine | undefined;
   if (body.lineId) {
@@ -260,21 +287,29 @@ export async function createProducts(body: CreateRequest): Promise<{ line: DbLin
       order: "sort.desc",
       limit: 1,
     });
-    [line] = await insert<DbLine>("product_lines", {
+    const row = {
       category_id: categoryId,
       brand: text(l.brand, "Бренд"),
       name: text(l.name, "Название линейки", { required: true }),
       note: text(l.note, "Пояснение"),
       image_url: url(l.imageUrl),
       sort: (last[0]?.sort ?? 0) + 10,
-    });
+      ...badge,
+    };
+    [line] = await withNewBadge(() => insert<DbLine>("product_lines", row), isNew);
   }
+  const newLine = !body.lineId;
 
   const lastItem = await selectAll<DbItem>("items", { line_id: `eq.${line.id}`, order: "sort.desc", limit: 1 });
   const base = lastItem[0]?.sort ?? 0;
-  const items = await insert<DbItem>(
-    "items",
-    titles.map((title, i) => ({ line_id: line!.id, title, variant, sort: base + (i + 1) * 10 })),
+  const items = await withNewBadge(
+    () =>
+      insert<DbItem>(
+        "items",
+        // Новая линейка помечается целиком, а вкусы в существующей — каждый.
+        titles.map((title, i) => ({ line_id: line!.id, title, variant, sort: base + (i + 1) * 10, ...(newLine ? {} : badge) })),
+      ),
+    isNew && !newLine,
   );
   await insert(
     "item_stock",

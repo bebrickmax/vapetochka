@@ -17,6 +17,8 @@ export interface DbLine {
   sort: number;
   /** Ключ линейки в Google Таблице (null — линейка добавлена в админке). */
   sheet_key?: string | null;
+  /** Метка «Новинка!» (нет колонки — база ещё не обновлена). */
+  is_new?: boolean;
 }
 
 export interface DbItem {
@@ -28,6 +30,8 @@ export interface DbItem {
   sort: number;
   /** Ключ позиции внутри линейки в Google Таблице (null — добавлена в админке). */
   sheet_key?: string | null;
+  /** Метка «Новинка!» у отдельного вкуса. */
+  is_new?: boolean;
 }
 
 export interface DbStock {

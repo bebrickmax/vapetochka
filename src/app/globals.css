@@ -143,6 +143,96 @@ input[type="search"]::-webkit-search-cancel-button {
   }
 }
 
+/* ─── Метка «Новинка!» ───────────────────────────────────────────────────── */
+/*
+ * Единственный цветной акцент на ч/б витрине: тёплый градиент, мягкое свечение и блик,
+ * который пробегает раз в несколько секунд. Анимируется только transform блика — это
+ * дёшево даже на старых айфонах; при «уменьшить движение» блик не бегает.
+ */
+
+.badge-new {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  overflow: hidden;
+  isolation: isolate;
+  border-radius: 999px;
+  padding: 0.42em 0.75em 0.38em 0.6em;
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgb(90 0 40 / 0.35);
+  background: linear-gradient(115deg, #ffb13b 0%, #ff4f7b 48%, #a64dff 100%);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.32),
+    0 6px 16px -5px rgb(255 79 123 / 0.75),
+    0 0 18px -4px rgb(166 77 255 / 0.55);
+}
+
+.badge-new::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, transparent 25%, rgb(255 255 255 / 0.6) 50%, transparent 75%);
+  transform: translateX(-130%);
+  animation: badge-shine 4.2s ease-in-out infinite;
+}
+
+/* Наклейка в углу фото на карточке линейки. */
+.badge-new-sticker {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  transform: rotate(-4deg);
+  font-size: 9px;
+  padding: 0.38em 0.6em 0.34em 0.5em;
+}
+
+/* Метка выключена (переключатель в админке). */
+.badge-new-off {
+  color: var(--color-muted);
+  text-shadow: none;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+}
+
+.badge-new-off::after {
+  display: none;
+}
+
+/* Круглая кнопка в админке, когда метка стоит. */
+.badge-new-dot {
+  background: linear-gradient(115deg, #ffb13b 0%, #ff4f7b 48%, #a64dff 100%);
+  box-shadow: 0 6px 16px -6px rgb(255 79 123 / 0.8);
+}
+
+/* Карточка новинки: тонкая тёплая рамка и свечение снизу. */
+.card-new {
+  border-color: rgb(255 79 123 / 0.45);
+  box-shadow:
+    0 0 0 1px rgb(166 77 255 / 0.18),
+    0 22px 48px -30px rgb(255 79 123 / 0.75);
+}
+
+@keyframes badge-shine {
+  0%,
+  60% {
+    transform: translateX(-130%);
+  }
+  85%,
+  100% {
+    transform: translateX(130%);
+  }
+}
+
 /* ─── Заставка при входе ─────────────────────────────────────────────────── */
 /*
  * Логотип 607×232 (единицы viewBox): знак — 149 шириной слева,

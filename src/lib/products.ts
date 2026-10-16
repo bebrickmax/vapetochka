@@ -50,6 +50,7 @@ export function toProduct(group: ProductGroup, itemIndex: number): Product {
     ...(group.family && { family: group.family }),
     ...(group.strength && { strength: group.strength }),
     ...(group.note && { note: group.note }),
+    ...(group.isNew && { isNew: true }), // новая линейка — новинка каждый её вкус
   };
 }
 

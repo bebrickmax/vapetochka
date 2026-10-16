@@ -21,10 +21,19 @@ async function mirrorSettings() {
 }
 
 /** Синхронизировать точку с таблицей сейчас (фото — с большим лимитом). */
-export async function syncNow(rawStore: unknown, mode: "sync" | "new" | "replace" = "sync"): Promise<SyncReport> {
+export async function syncNow(
+  rawStore: unknown,
+  mode: "sync" | "new" | "replace" = "sync",
+  photos: { max?: number; seconds?: number } = {},
+): Promise<SyncReport> {
   const store = storeId(rawStore);
   await mirrorSettings();
-  const result = await syncStore(store, { maxPhotos: 150, onlyNew: mode === "new", force: mode === "replace" });
+  const result = await syncStore(store, {
+    maxPhotos: photos.max ?? 150,
+    photoSeconds: photos.seconds ?? 150,
+    onlyNew: mode === "new",
+    force: mode === "replace",
+  });
   if (!result) throw new AdminError("Синхронизация этой точки уже идёт — подождите полминуты и обновите страницу.", 409);
   return result.report;
 }
@@ -41,7 +50,17 @@ export async function changeStoreSource(rawStore: unknown, rawSource: unknown): 
   const current = sourceOf(settings, store);
 
   if (rawSource === "db") {
-    const report = current === "sheet" ? await syncNow(store) : undefined;
+    // Последняя синхронизация — с запасом на фото: в режиме «от админки» они уже не докачаются сами.
+    const report = current === "sheet" ? await syncNow(store, "sync", { max: 400, seconds: 170 }) : undefined;
+    if (report?.stock.removalSkipped && report.stock.skipReason === "partial")
+      throw new AdminError("Google сейчас не отдал список листов таблицы — переключение отменено, чтобы ничего не потерять. Попробуйте через пару минут.", 409);
+    if (report && report.photos.pending > 0)
+      throw new AdminError(
+        `Перейти на админку пока нельзя: из таблицы ещё не скопировано ${report.photos.pending} фото` +
+          (report.photos.copied ? ` (сейчас скопировано ${report.photos.copied})` : "") +
+          ". В режиме «от админки» они сами уже не докачаются. Нажмите «Перейти на админку» ещё раз — продолжу с того же места.",
+        409,
+      );
     const stock = await selectAll("item_stock", { store_id: `eq.${store}`, limit: 1 });
     if (stock.length === 0) throw new AdminError("В базе нет товаров этой точки — сначала синхронизируйте её с таблицей.");
     await setStoreSource(store, "db");
@@ -63,7 +82,12 @@ export function describeSync(title: string, r: SyncReport): string {
   if (r.stock.removed) parts.push(`убрано (нет в таблице): ${r.stock.removed}`);
   if (r.photos.copied) parts.push(`фото: ${r.photos.copied}`);
   if (r.photos.pending) parts.push(`ещё фото в очереди: ${r.photos.pending}`);
+  if (r.photos.failed) parts.push(`фото не скопировалось: ${r.photos.failed}`);
   let text = `«${title}»: ${parts.length ? parts.join(", ") : "всё уже совпадает с таблицей"}`;
-  if (r.stock.removalSkipped) text += ". Удаление пропущено: таблица прочиталась подозрительно короткой — проверьте её";
+  if (r.stock.removalSkipped)
+    text +=
+      r.stock.skipReason === "partial"
+        ? ". Удаление пропущено: Google не отдал список листов, взят запасной — убранное из таблицы уберу при следующей синхронизации"
+        : ". Удаление пропущено: таблица прочиталась подозрительно короткой — проверьте её";
   return text;
 }

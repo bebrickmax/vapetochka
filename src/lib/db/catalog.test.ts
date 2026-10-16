@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { toProduct } from "@/lib/products";
+import { buildHaystack, matches, parseQuery } from "@/lib/search";
 import { catalogFromSnapshot } from "./catalog";
 import type { DbSnapshot } from "./types";
 
@@ -41,5 +43,29 @@ describe("catalogFromSnapshot", () => {
     expect(kg.categories.map((c) => c.title)).toEqual(["Снюс"]);
     expect(kg.groups[0]).toMatchObject({ line: "Drymost 75mg", family: "Drymost" });
     expect(kg.groups[0].items[0]).toMatchObject({ name: "Mint", price: 16, status: "in" });
+  });
+
+  it("carries the «Новинка» marks of lines and flavours", () => {
+    const marked: DbSnapshot = {
+      ...snapshot,
+      lines: snapshot.lines.map((l, i) => ({ ...l, is_new: i === 1 })),
+      items: snapshot.items.map((item) => ({ ...item, is_new: item.id === "i2" })),
+    };
+    const [rick] = catalogFromSnapshot(marked, "main").groups;
+    expect(rick.isNew).toBeUndefined();
+    expect(rick.items.map((i) => i.isNew)).toEqual([undefined, true]);
+    const [drymost] = catalogFromSnapshot(marked, "kamennaya-gorka").groups;
+    expect(drymost.isNew).toBe(true);
+    // Новинки находятся поиском «новинка».
+    const query = parseQuery("новинка");
+    expect(matches(buildHaystack(toProduct(drymost, 0)), query)).toBe(true);
+    expect(matches(buildHaystack(toProduct(rick, 0)), query)).toBe(false);
+    expect(matches(buildHaystack(toProduct(rick, 1)), query)).toBe(true);
+  });
+
+  it("drops a stale old price that is not above the current one", () => {
+    const raised: DbSnapshot = { ...snapshot, stock: snapshot.stock.map((s) => (s.item_id === "i2" ? { ...s, price: 20 } : s)) };
+    const [rick] = catalogFromSnapshot(raised, "main").groups;
+    expect(rick.items[1]).toEqual({ emoji: "🍉", name: "Арбуз", description: "Сочный", price: 20, status: "out" });
   });
 });

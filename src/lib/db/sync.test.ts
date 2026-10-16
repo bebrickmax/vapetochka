@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createProducts, deleteItem, updateItem } from "@/lib/admin/mutations";
+import { createProducts, deleteItem, updateItem, updateLine } from "@/lib/admin/mutations";
 import type { RawSheet } from "@/lib/types";
 import { catalogFromSnapshot } from "./catalog";
 import { categoriesFromSheets, importCategories } from "./import";
@@ -205,5 +205,45 @@ describe("sync: Google Sheet → database mirror", () => {
     const r = await syncFromSheets("main", { sheets: [liquids([["Рик 50mg", "15 BYN", many.slice(0, 3)]])] });
     expect(r.report.stock.removalSkipped).toBe(true);
     expect(catalogFromSnapshot(db.snapshot(), "main").groups[0].items).toHaveLength(30);
+  });
+
+  it("keeps «Новинка» marks from the admin through syncs with the sheet", async () => {
+    const db = fakeSupabase();
+    const v1 = { sheets: [liquids([["Рик 50mg", "15 BYN", [["🍌Банан", "✅"]]]])] };
+    await syncFromSheets("main", v1);
+    db.synced("main");
+
+    // Линейку из таблицы можно отметить новинкой, даже пока точка «от таблицы».
+    const rick = db.tables.product_lines.find((l) => l.name === "Рик 50mg")!;
+    await updateLine(String(rick.id), { isNew: true });
+    // Новый вкус в существующую линейку — сразу с меткой.
+    const { items } = await createProducts({ lineId: String(rick.id), titles: ["🍒Вишня"], stores: ["main"], price: 15, isNew: true });
+    expect(items[0].is_new).toBe(true);
+    // Новая линейка с меткой: метка на линейке, не на каждом вкусе.
+    const mint = await createProducts({ line: { categoryId: "liquids", name: "Мята 20mg" }, titles: ["Мята"], stores: ["main"], price: 12, isNew: true });
+    expect(mint.line.is_new).toBe(true);
+    expect(mint.items[0].is_new).toBeUndefined();
+
+    // Таблица поменяла цену — синхронизация метки не трогает.
+    await syncFromSheets("main", { sheets: [liquids([["Рик 50mg", "16 BYN", [["🍌Банан", "✅"]]]])] });
+    const groups = catalogFromSnapshot(db.snapshot(), "main").groups;
+    const rickGroup = groups.find((g) => g.line === "Рик 50mg")!;
+    expect(rickGroup.isNew).toBe(true);
+    expect(rickGroup.items.find((i) => i.name === "Вишня")?.isNew).toBe(true);
+    expect(groups.find((g) => g.line === "Мята 20mg")?.isNew).toBe(true);
+
+    await updateLine(String(rick.id), { isNew: false });
+    expect(catalogFromSnapshot(db.snapshot(), "main").groups.find((g) => g.line === "Рик 50mg")?.isNew).toBeUndefined();
+  });
+
+  it("removes nothing when the sheet list came from the fallback", async () => {
+    const db = fakeSupabase();
+    const both = [liquids([["Рик 50mg", "15 BYN", [["🍌Банан", "✅"]]]]), sheet("Снюс", [["Drymost 75mg"], ["10 BYN"], ["", "Mint", "✅"]])];
+    await syncFromSheets("main", { sheets: both });
+    db.synced("main");
+    // Google не отдал список листов — в запасном нет «Снюса».
+    const r = await syncFromSheets("main", { sheets: [both[0]], partial: true });
+    expect(r.report.stock).toMatchObject({ removed: 0, removalSkipped: true, skipReason: "partial" });
+    expect(catalogFromSnapshot(db.snapshot(), "main").groups.map((g) => g.line)).toEqual(["Рик 50mg", "Drymost 75mg"]);
   });
 });

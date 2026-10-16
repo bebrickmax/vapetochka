@@ -27,11 +27,19 @@ import {
   type ItemView,
   type LineView,
 } from "./model";
-import { inputClass, PrimaryButton, Toggle } from "./ui";
+import { inputClass, NewBadge, NewBadgeButton, PrimaryButton, Toggle } from "./ui";
 
 type Session = { authorized: boolean; adminConfigured: boolean; dbConfigured: boolean };
 
 const STORE_KEY = "vt:admin-store";
+
+/** Тост после правки: для одной метки «Новинка» — понятнее, чем «Сохранено». */
+const savedText = (patch: { isNew?: boolean }) =>
+  Object.keys(patch).length === 1 && patch.isNew !== undefined
+    ? patch.isNew
+      ? "✨ Отмечено как новинка"
+      : "Метка «Новинка» снята"
+    : "Сохранено";
 
 /** «14:05» — время последней синхронизации. */
 function formatTime(iso: string): string {
@@ -161,7 +169,9 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
 
   const notify = useCallback((text: string, error = false) => {
     setToast({ text, error });
-    window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), error ? 5000 : 2200);
+    // Длинное сообщение (отчёт синхронизации, причина отказа) держим дольше — чтобы успеть прочитать.
+    const ms = Math.max(error ? 5000 : 2200, Math.min(12000, text.length * 55));
+    window.setTimeout(() => setToast((t) => (t?.text === text ? null : t)), ms);
   }, []);
 
   const handleError = useCallback(
@@ -267,6 +277,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               ...(patch.title !== undefined && { title: patch.title }),
               ...(patch.variant !== undefined && { variant: patch.variant }),
               ...(patch.imageUrl !== undefined && { image_url: patch.imageUrl }),
+              ...(patch.isNew !== undefined && { is_new: patch.isNew }),
             });
             if (patch.title !== undefined || patch.variant !== undefined) {
               const lineId = next.items.find((i) => i.id === id)?.line_id;
@@ -288,7 +299,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             return next;
           },
           () => api(`/api/admin/items/${id}`, { method: "PATCH", body: patch }),
-          "Сохранено",
+          savedText(patch),
         ),
       deleteItem: (id) => optimistic((d) => removeItem(d, id), () => api(`/api/admin/items/${id}`, { method: "DELETE" }), "Удалено"),
       updateLine: (id, patch) =>
@@ -300,9 +311,10 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
               ...(patch.note !== undefined && { note: patch.note }),
               ...(patch.categoryId !== undefined && { category_id: patch.categoryId }),
               ...(patch.imageUrl !== undefined && { image_url: patch.imageUrl }),
+              ...(patch.isNew !== undefined && { is_new: patch.isNew }),
             }),
           () => api(`/api/admin/lines/${id}`, { method: "PATCH", body: patch }),
-          "Сохранено",
+          savedText(patch),
         ),
       deleteLine: (id) => optimistic((d) => removeLine(d, id), () => api(`/api/admin/lines/${id}`, { method: "DELETE" }), "Линейка удалена"),
       sortLines: (lineIds) =>
@@ -362,20 +374,23 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
   const syncedAt = data.syncedAt[storeId];
   const unlockedLines = data.lines.some((l) => !locks.lines.has(l.id));
 
-  const switchSource = async (source: "sheet" | "db", target = storeId) => {
+  /** Переключает режим точки. Возвращает текст ошибки (null — получилось или отменили). */
+  const switchSource = async (source: "sheet" | "db", target = storeId): Promise<string | null> => {
     const title = data.stores.find((s) => s.id === target)?.title ?? target;
     const text =
       source === "sheet"
         ? `Вернуть «${title}» на Google Таблицу? Изменения, сделанные в таблице за это время, придут на сайт; товары, добавленные в админке, останутся.`
-        : `Перевести «${title}» на админку? Сначала подтяну последние изменения из таблицы, а дальше сайт работает только от админки — правки в таблице перестанут влиять.`;
-    if (!window.confirm(text)) return;
+        : `Перевести «${title}» на админку? Сначала подтяну последние изменения из таблицы и докачаю фото, а дальше сайт работает только от админки — правки в таблице перестанут влиять.`;
+    if (!window.confirm(text)) return null;
     setSyncing(true);
     try {
       const res = await api<{ text?: string }>("/api/admin/settings", { method: "PUT", body: { storeId: target, source } });
       notify(`${source === "sheet" ? `«${title}» работает от таблицы` : `«${title}» работает от админки`}${res.text ? `. ${res.text}` : ""}`);
       await load();
+      return null;
     } catch (e) {
       handleError(e);
+      return e instanceof Error ? e.message : "Не удалось переключить";
     } finally {
       setSyncing(false);
     }
@@ -505,9 +520,17 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
             <option value="all">Любое наличие</option>
             <option value="in">В наличии</option>
             <option value="out">Нет в наличии</option>
+            {data.features?.newBadge && <option value="new">✨ Новинки</option>}
           </select>
         </div>
       </div>
+
+      {data.features && !data.features.newBadge && (
+        <p className="mx-4 mt-3 rounded-2xl border border-line-strong p-3 text-sm leading-relaxed text-ink/90">
+          Чтобы появилась метка <b>«Новинка!»</b>, обновите базу: Supabase → SQL Editor → вставьте новый{" "}
+          <b>supabase/schema.sql</b> → Run (данные не пострадают).
+        </p>
+      )}
 
       {/* Откуда точка берёт товары */}
       {!data.schemaReady && (
@@ -648,7 +671,7 @@ function Panel({ onLoggedOut }: { onLoggedOut: () => void }) {
                 {
                   ...d,
                   lines: d.lines.some((l) => l.id === line.id) ? d.lines : [...d.lines, line],
-                  items: [...d.items, ...items],
+                  items: [...d.items, ...items], // метка «Новинка» уже в строках, которые вернул сервер
                   stock: [
                     ...d.stock,
                     ...items.flatMap((i) => stores.map<DbStock>((s) => ({ item_id: i.id, store_id: s, price, old_price: null, in_stock: inStock }))),
@@ -761,11 +784,15 @@ function LineBlock({
               {[category?.title, line.brand, line.section].filter(Boolean).join(" · ")}
             </span>
             <span className="font-wide block text-[15px] font-semibold leading-tight [overflow-wrap:anywhere]">{line.name}</span>
+            {line.is_new && <NewBadge className="mt-1" />}
             <span className="mt-0.5 block text-[12px] text-muted">
               {view.inStock}/{view.all.length} в наличии · {formatPrice(view.price)}
             </span>
           </span>
         </button>
+        {data.features?.newBadge && (
+          <NewBadgeButton active={!!line.is_new} label={line.name} onToggle={() => void actions.updateLine(line.id, { isNew: !line.is_new })} />
+        )}
         <button
           type="button"
           onClick={onEditLine}
@@ -833,6 +860,11 @@ function ItemRow({
           />
         )}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-muted">
+          {item.is_new && (
+            <button type="button" onClick={() => void actions.updateItem(item.id, { isNew: false })} aria-label={`Убрать метку «Новинка»: ${item.title}`}>
+              <NewBadge />
+            </button>
+          )}
           {item.variant && <span>{item.variant}</span>}
           <InlinePrice value={price} highlight={price !== linePrice} onSave={(p) => actions.setStock([item.id], { price: p })} />
           {overridden && (

@@ -24,6 +24,9 @@ export const json = (data: unknown, status = 200) =>
 export function warmStorefront(request: Request) {
   const origin = new URL(request.url).origin;
   after(async () => {
+    // Сброс кэша Next применяет, когда обработчик уже ответил, — даём ему секунду, чтобы страница
+    // точно считалась устаревшей и пересобралась, а не отдалась из кэша как свежая.
+    await new Promise((resolve) => setTimeout(resolve, 1200));
     await Promise.allSettled(
       stores.map((store) => fetch(`${origin}/${store.id}`, { cache: "no-store", signal: AbortSignal.timeout(30_000) })),
     );
@@ -36,6 +39,7 @@ export function warmStorefront(request: Request) {
  */
 export function refreshStorefront(request: Request) {
   revalidateTag(cacheConfig.tag, "max");
+  revalidateTag(cacheConfig.settingsTag, "max");
   warmStorefront(request);
 }
 

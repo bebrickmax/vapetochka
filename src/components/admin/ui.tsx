@@ -174,3 +174,39 @@ export function StoreChecks({
     </div>
   );
 }
+
+/** Метка «Новинка!» — как на витрине. */
+export function NewBadge({ className = "" }: { className?: string }) {
+  return <span className={`badge-new ${className}`}>✨ Новинка</span>;
+}
+
+/** Переключатель «Новинка!» в окне линейки или вкуса: срабатывает сразу, без «Сохранить». */
+export function NewBadgeRow({ checked, onChange, hint }: { checked: boolean; onChange: (next: boolean) => void; hint?: string }) {
+  return (
+    <div className="flex items-center gap-3 rounded-2xl border border-line px-4 py-1.5">
+      <div className="min-w-0 flex-1 py-1">
+        <span className={`badge-new ${checked ? "" : "badge-new-off"}`}>✨ Новинка!</span>
+        {hint && <p className="mt-1 text-xs leading-snug text-muted">{hint}</p>}
+      </div>
+      <Toggle checked={checked} onChange={onChange} label="Новинка" />
+    </div>
+  );
+}
+
+/** Круглая кнопка «Новинка» в строке линейки — поставить или снять метку в одно нажатие. */
+export function NewBadgeButton({ active, onToggle, label }: { active: boolean; onToggle: () => void; label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={active}
+      aria-label={active ? `Убрать метку «Новинка»: ${label}` : `Отметить как новинку: ${label}`}
+      title={active ? "Новинка — нажмите, чтобы убрать" : "Отметить как новинку"}
+      className={`flex size-11 shrink-0 items-center justify-center rounded-full text-lg transition active:scale-90 ${
+        active ? "badge-new-dot" : "border border-line text-ink/35 grayscale"
+      }`}
+    >
+      ✨
+    </button>
+  );
+}

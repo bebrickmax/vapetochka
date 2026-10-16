@@ -114,6 +114,7 @@ export function buildHaystack(product: Product, category?: Category): string {
       product.strength,
       product.note,
       category?.title,
+      product.isNew && "новинка новинки new",
     ]
       .filter(Boolean)
       .join(" "),

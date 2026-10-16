@@ -65,6 +65,7 @@ export function catalogFromSnapshot(snapshot: DbSnapshot, storeId: string): Cata
           ...(discounted && { oldPrice }),
           status: stock.in_stock ? "in" : "out",
           ...(item.image_url && { image: item.image_url }),
+          ...(item.is_new && { isNew: true }),
         };
       });
       const strength = parseStrength(line.name);
@@ -79,6 +80,7 @@ export function catalogFromSnapshot(snapshot: DbSnapshot, storeId: string): Cata
           ...(strength && { strength }),
           ...(line.note && { note: line.note }),
           ...(image && { image }),
+          ...(line.is_new && { isNew: true }),
           items,
         },
       };

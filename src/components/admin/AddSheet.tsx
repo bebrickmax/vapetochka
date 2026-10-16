@@ -13,7 +13,7 @@ interface Props {
   /** Открыть сразу для существующей линейки (кнопка «+ вкус» в линейке). */
   presetLine?: DbLine;
   onClose: () => void;
-  onCreated: (result: { line: DbLine; items: DbItem[]; stores: string[]; price: number | null; inStock: boolean }) => void;
+  onCreated: (result: { line: DbLine; items: DbItem[]; stores: string[]; price: number | null; inStock: boolean; isNew: boolean }) => void;
 }
 
 const norm = (s: string) => s.toLowerCase().replace(/ё/g, "е").replace(/\s+/g, " ").trim();
@@ -29,6 +29,7 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
   const [image, setImage] = useState("");
   const [stores, setStores] = useState<string[]>([storeId]);
   const [inStock, setInStock] = useState(true);
+  const [isNew, setIsNew] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -82,10 +83,11 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
           price: price.trim() || suggestedPrice,
           stores,
           inStock,
+          ...(isNew && { isNew }),
         },
       });
       const p = price.trim() ? Number(price.replace(",", ".")) : suggestedPrice;
-      onCreated({ ...result, stores, price: p, inStock });
+      onCreated({ ...result, stores, price: p, inStock, isNew });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Не удалось сохранить");
       setBusy(false);
@@ -166,6 +168,18 @@ export function AddSheet({ data, storeId, presetLine, onClose, onCreated }: Prop
         <span className="text-sm font-bold">Сразу в наличии</span>
         <Toggle checked={inStock} onChange={setInStock} label="Сразу в наличии" />
       </div>
+
+      {data.features?.newBadge && (
+        <div className="flex items-center gap-3 rounded-2xl border border-line px-4 py-1.5">
+          <div className="min-w-0 flex-1 py-1">
+            <span className={`badge-new ${isNew ? "" : "badge-new-off"}`}>✨ Новинка!</span>
+            <p className="mt-1 text-xs leading-snug text-muted">
+              {existing ? "Метка у добавленных вкусов на сайте." : "Плашка на карточке новой линейки на сайте."} Снять — в любой момент.
+            </p>
+          </div>
+          <Toggle checked={isNew} onChange={setIsNew} label="Новинка" />
+        </div>
+      )}
 
       {!existing && <PhotoField value={image} onChange={setImage} />}
     </Sheet>
