@@ -30,7 +30,7 @@ import {
 } from "./model";
 import { inputClass, NewBadge, NewBadgeButton, PrimaryButton, Toggle } from "./ui";
 
-type Session = { authorized: boolean; adminConfigured: boolean; dbConfigured: boolean };
+type Session = { authorized: boolean; adminConfigured: boolean; dbConfigured: boolean; dbPaused?: boolean };
 
 const STORE_KEY = "vt:admin-store";
 
@@ -74,6 +74,13 @@ export function AdminApp() {
       </Notice>
     );
   if (!session.authorized) return <Login onLoggedIn={refreshSession} />;
+  if (session.dbPaused)
+    return (
+      <Notice title="База на паузе — сайт работает от Google Таблиц">
+        Меняйте наличие и цены прямо в таблицах «Общий прайс» и «Каменная Горка» — сайт подтянет изменения сам
+        примерно за минуту. Админка снова заработает, когда база вернётся. Данные в базе целы.
+      </Notice>
+    );
   if (!session.dbConfigured)
     return (
       <Notice title="База данных не подключена">
