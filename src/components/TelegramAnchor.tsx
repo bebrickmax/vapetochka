@@ -2,6 +2,7 @@
 
 import type { MouseEvent, ReactNode } from "react";
 import { isAppleMobile, isDesktopDevice, type TelegramLink } from "@/lib/telegram";
+import { telegramWebApp } from "@/lib/telegram-webapp";
 
 const FALLBACK_DELAY_MS = 1200;
 
@@ -53,6 +54,12 @@ const onAppleMobile = () => isAppleMobile(navigator.userAgent, navigator.maxTouc
  * Возвращает true, если текст нужно вставить вручную.
  */
 export function openTelegram(link: TelegramLink, { silent = false }: OpenOptions = {}): boolean {
+  // Каталог открыт внутри Telegram — чат открывает сам Telegram, с готовым текстом.
+  const miniApp = telegramWebApp();
+  if (miniApp) {
+    miniApp.openTelegramLink(link.web);
+    return false;
+  }
   if (onAppleMobile()) {
     window.location.href = link.web;
     return false;
@@ -102,7 +109,7 @@ interface TelegramAnchorProps {
 export function TelegramAnchor({ link, className, children, ...rest }: TelegramAnchorProps) {
   const onClick = (event: MouseEvent<HTMLAnchorElement>) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
-    if (onAppleMobile()) return; // обычный переход по t.me — самый надёжный способ на iOS
+    if (onAppleMobile() && !telegramWebApp()) return; // обычный переход по t.me — самый надёжный способ на iOS
     event.preventDefault();
     openTelegram(link);
   };
