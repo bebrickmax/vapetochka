@@ -1,11 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { after, type NextRequest } from "next/server";
 import { revalidateTag } from "next/cache";
-import { cacheConfig } from "@/config/site";
+import { cacheConfig, siteUrl } from "@/config/site";
 import { warmStorefront } from "@/lib/admin/api";
 import { saveDailyBackup } from "@/lib/db/backup";
 import { isDbConfigured } from "@/lib/db/supabase";
 import { syncAll } from "@/lib/db/sync";
+import { ensureBotSetup, isBotConfigured } from "@/lib/telegram-bot";
 
 /** Синхронизация обеих точек с таблицей и фото — с запасом по времени. */
 export const maxDuration = 300;
@@ -57,6 +58,15 @@ async function handle(request: NextRequest) {
     revalidateTag(cacheConfig.tag, "max");
   }
   warmStorefront(request);
+
+  // Telegram-бот: как только в Vercel появился TELEGRAM_BOT_TOKEN, бот сам подключается к сайту
+  // (вебхук, кнопка «Каталог») при ближайшем автообновлении. Только в проде — превью не перехватят бота.
+  if (isBotConfigured() && process.env.VERCEL_ENV === "production") {
+    after(async () => {
+      const changed = await ensureBotSetup(siteUrl).catch((error) => console.error("[revalidate] Бот не подключился:", error));
+      if (changed) console.log("[revalidate] Telegram-бот подключён к сайту");
+    });
+  }
 
   // 3. Резервная копия раз в сутки (первый вызов после полуночи по Минску).
   if (isDbConfigured()) {

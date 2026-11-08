@@ -13,6 +13,11 @@ export const siteConfig = {
   telegramManager: process.env.NEXT_PUBLIC_TG_MANAGER || "VapeTochkaManager",
 } as const;
 
+/** Адрес сайта в проде (для ссылок из Telegram-бота и метаданных). */
+export const siteUrl = process.env.VERCEL_PROJECT_PRODUCTION_URL
+  ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+  : "https://vapetochka.vercel.app";
+
 /**
  * Как читаются таблицы. ID самих таблиц — в src/config/stores.ts
  * (у каждой точки продаж своя таблица).

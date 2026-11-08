@@ -18,6 +18,7 @@ import {
 } from "@/lib/cart";
 import { formatPrice, pluralize } from "@/lib/format";
 import { telegramLink } from "@/lib/telegram";
+import { telegramWebApp } from "@/lib/telegram-webapp";
 import { ArrowLeftIcon, CartIcon, CheckIcon, CloseIcon, RepeatIcon, TelegramIcon, TrashIcon } from "../icons";
 import { copyText, openTelegram, showToast } from "../TelegramAnchor";
 import { useCart, useCartActions, useCartDrawer, useLastOrder } from "./CartProvider";
@@ -25,6 +26,20 @@ import { ManagerHours } from "./ManagerHours";
 import { QtyStepper } from "./QtyStepper";
 
 type View = "cart" | "checkout" | "sent";
+
+/** Каталог открыт в Telegram: заказ сразу уходит менеджеру через бота. false — бот не настроен или не ответил. */
+async function sendViaBot(initData: string, text: string, storeId: string): Promise<boolean> {
+  try {
+    const res = await fetch("/api/telegram/order", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData, text, storeId }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 /** Корзина и оформление заказа в выезжающей панели (снизу на телефоне, справа на компьютере). */
 export function CartDrawer({ store }: { store: StoreInfo }) {
@@ -56,6 +71,8 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
   const [submitted, setSubmitted] = useState(false);
   const [sentText, setSentText] = useState("");
   const [copied, setCopied] = useState(false);
+  const [viaBot, setViaBot] = useState(false);
+  const [sending, setSending] = useState(false);
   /** На компьютере чат открывается без текста — его нужно вставить. */
   const [needsPaste, setNeedsPaste] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -84,15 +101,29 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
 
   const copy = async (text: string) => setCopied(await copyText(text));
 
-  const send = () => {
+  const send = async () => {
     setSubmitted(true);
     if (!valid) {
       bodyRef.current?.querySelector<HTMLElement>("[aria-invalid=true]")?.focus();
       return;
     }
+    if (sending) return;
     const text = buildOrderMessage(items, form, store.title);
     lastOrder.save(availableItems(items));
     setSentText(text);
+    // В Telegram — сразу через бота в рабочий чат. Не вышло — как на сайте: чат с менеджером.
+    const miniApp = telegramWebApp();
+    if (miniApp) {
+      setSending(true);
+      const ok = await sendViaBot(miniApp.initData, text, store.id);
+      setSending(false);
+      if (ok) {
+        miniApp.HapticFeedback?.notificationOccurred("success");
+        setViaBot(true);
+        go("sent");
+        return;
+      }
+    }
     void copy(text); // запасной вариант: если Telegram не подставит текст — его можно вставить
     go("sent");
     setNeedsPaste(openTelegram(telegramLink(text), { silent: true }));
@@ -104,7 +135,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
     onClose();
   };
 
-  const title = view === "cart" ? "Корзина" : view === "checkout" ? "Оформление заказа" : "Заказ сформирован";
+  const title = view === "cart" ? "Корзина" : view === "checkout" ? "Оформление заказа" : viaBot ? "Заказ отправлен" : "Заказ сформирован";
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-stretch sm:justify-end">
@@ -136,7 +167,7 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
             <CheckoutFields store={store} form={form} setForm={setForm} errors={submitted ? errors : {}} />
           )}
           {view === "sent" && (
-            <SentView text={sentText} copied={copied} needsPaste={needsPaste} onCopy={() => copy(sentText)} />
+            <SentView text={sentText} copied={copied} needsPaste={needsPaste} viaBot={viaBot} onCopy={() => copy(sentText)} />
           )}
         </div>
 
@@ -149,13 +180,25 @@ function DrawerPanel({ store, onClose, form: rawForm, setForm }: DrawerPanelProp
           {view === "checkout" && (
             <>
               {submitted && errors.cart && <p className="text-sm font-semibold text-danger">{errors.cart}</p>}
-              <PrimaryButton onClick={send} disabled={items.length === 0}>
+              <PrimaryButton onClick={send} disabled={items.length === 0 || sending}>
                 <TelegramIcon />
-                Отправить заказ
+                {sending ? "Отправляю…" : "Отправить заказ"}
               </PrimaryButton>
             </>
           )}
-          {view === "sent" && (
+          {view === "sent" && viaBot && (
+            <>
+              <PrimaryButton onClick={finish}>Готово</PrimaryButton>
+              <button
+                type="button"
+                onClick={() => openTelegram(telegramLink())}
+                className="h-12 w-full rounded-full border border-line-strong text-sm font-semibold text-ink/85 transition active:scale-[0.98]"
+              >
+                Написать менеджеру
+              </button>
+            </>
+          )}
+          {view === "sent" && !viaBot && (
             <>
               <PrimaryButton onClick={() => setNeedsPaste(openTelegram(telegramLink(sentText), { silent: true }))}>
                 <TelegramIcon />
@@ -322,10 +365,7 @@ function CheckoutFields({ store, form, setForm, errors }: CheckoutFieldsProps) {
             Заказ соберём из наличия этой точки. Время, когда можно забрать, подскажет менеджер.
           </p>
         </div>
-        <p className="text-xs leading-relaxed text-muted">
-          Заказ откроется в Telegram в чате с @{siteConfig.telegramManager} — останется нажать «Отправить». Текст заказа
-          также копируется в буфер обмена.
-        </p>
+        <CheckoutHint />
       </form>
     );
   }
@@ -435,11 +475,19 @@ function CheckoutFields({ store, form, setForm, errors }: CheckoutFieldsProps) {
         </div>
       )}
 
-      <p className="text-xs leading-relaxed text-muted">
-        Заказ откроется в Telegram в чате с @{siteConfig.telegramManager} — останется нажать «Отправить». Текст заказа
-        также копируется в буфер обмена.
-      </p>
+      <CheckoutHint />
     </form>
+  );
+}
+
+/** Подсказка под формой: куда уйдёт заказ. */
+function CheckoutHint() {
+  return (
+    <p className="text-xs leading-relaxed text-muted">
+      {telegramWebApp()
+        ? `Заказ уйдёт менеджеру @${siteConfig.telegramManager} прямо здесь, в Telegram.`
+        : `Заказ откроется в Telegram в чате с @${siteConfig.telegramManager} — останется нажать «Отправить». Текст заказа также копируется в буфер обмена.`}
+    </p>
   );
 }
 
@@ -447,16 +495,20 @@ interface SentViewProps {
   text: string;
   copied: boolean;
   needsPaste: boolean;
+  /** Заказ уже у менеджера — отправлен ботом из Telegram. */
+  viaBot?: boolean;
   onCopy: () => void;
 }
 
-function SentView({ text, copied, needsPaste, onCopy }: SentViewProps) {
+function SentView({ text, copied, needsPaste, viaBot, onCopy }: SentViewProps) {
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-3 rounded-2xl border border-line-strong px-3.5 py-3">
         <CheckIcon className="shrink-0 text-ink" />
         <p className="text-sm leading-snug text-ink">
-          {needsPaste
+          {viaBot
+            ? "Заказ отправлен менеджеру — он напишет вам здесь, в Telegram. Копия заказа пришла в чат с ботом."
+            : needsPaste
             ? `Открываем чат с менеджером. ${copied ? "Текст заказа уже скопирован — вставьте" : "Скопируйте текст заказа и вставьте"} его в поле сообщения (⌘V или Ctrl+V) и отправьте.`
             : `Открываем чат с менеджером. Если текст заказа не подставился сам — вставьте его в чат${copied ? " (он уже скопирован)" : ""} и отправьте.`}
         </p>
