@@ -93,6 +93,7 @@ function fakeSupabase({ trash = false }: { trash?: boolean | "broken" } = {}) {
     throw new Error(`unexpected ${method} ${url}`);
   }) as typeof fetch;
   process.env.SUPABASE_URL = "https://fake.supabase.co";
+  process.env.DB_PAUSED = "0"; // база включена (по умолчанию она сейчас на паузе)
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
   const snapshot = () =>
     ({ categories: tables.categories, lines: tables.product_lines, items: tables.items, stock: tables.item_stock }) as unknown as DbSnapshot;

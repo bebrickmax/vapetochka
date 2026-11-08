@@ -15,6 +15,7 @@ const googleRequests: string[] = [];
 
 function serve(route: Route) {
   process.env.SUPABASE_URL = "https://fake.supabase.co";
+  process.env.DB_PAUSED = "0"; // база включена (по умолчанию она сейчас на паузе)
   process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
   globalThis.fetch = (async (input: string | URL) => {
     const url = new URL(String(input));
@@ -79,5 +80,24 @@ describe("витрина, когда база не отвечает", () => {
     });
     expect(await message(getCatalog("main"))).toMatch(/база не отвечает/);
     expect(snapshotReads).toBeGreaterThan(0);
+  });
+});
+
+describe("база на паузе (DB_PAUSED)", () => {
+  it("витрина берётся прямо из Google Таблиц, в базу запросов нет", async () => {
+    const dbRequests: string[] = [];
+    serve((url) => {
+      dbRequests.push(url.pathname);
+      return new Response(JSON.stringify({ message: "restricted" }), { status: 402 });
+    });
+    delete process.env.DB_PAUSED; // по умолчанию — пауза
+    const catalog = await getCatalog("main");
+    expect(dbRequests).toEqual([]);
+    expect(catalog.groups.length).toBeGreaterThan(0);
+  });
+
+  it("DB_PAUSED=0 включает базу обратно", async () => {
+    serve((url) => (table(url) === "store_settings" ? new Response(JSON.stringify({ message: "restricted" }), { status: 402 }) : undefined));
+    expect(await message(getCatalog("main"))).toMatch(/настройки точек не прочитались/);
   });
 });

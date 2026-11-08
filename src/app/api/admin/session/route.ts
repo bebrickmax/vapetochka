@@ -7,7 +7,7 @@ import {
   sessionCookie,
 } from "@/lib/admin/auth";
 import { json } from "@/lib/admin/api";
-import { isDbConfigured } from "@/lib/db/supabase";
+import { isDbConfigured, isDbPaused } from "@/lib/db/supabase";
 
 /** Состояние входа и настроек — админка решает, что показать. */
 export async function GET(request: Request) {
@@ -15,6 +15,7 @@ export async function GET(request: Request) {
     authorized: isAuthorized(request),
     adminConfigured: isAdminConfigured(),
     dbConfigured: isDbConfigured(),
+    dbPaused: isDbPaused(),
   });
 }
 

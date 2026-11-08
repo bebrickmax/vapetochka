@@ -12,8 +12,25 @@ function env() {
   return { url, key };
 }
 
-/** База подключена (заданы адрес и ключ). Без них сайт работает от Google Таблиц. */
+/**
+ * База на паузе — сайт работает напрямую от Google Таблиц, как до админки.
+ *
+ * Включается, когда Supabase недоступен надолго (например, исчерпан месячный лимит трафика бесплатного
+ * тарифа и проект заблокирован до начала следующего месяца). Переменная DB_PAUSED в Vercel: «1» — пауза,
+ * «0» — база работает. Без переменной действует значение по умолчанию ниже.
+ */
+const DB_PAUSED_BY_DEFAULT = true;
+
+export function isDbPaused(): boolean {
+  const flag = (process.env.DB_PAUSED ?? "").trim().toLowerCase();
+  if (flag === "1" || flag === "true") return true;
+  if (flag === "0" || flag === "false") return false;
+  return DB_PAUSED_BY_DEFAULT;
+}
+
+/** База подключена (заданы адрес и ключ) и не на паузе. Иначе сайт работает от Google Таблиц. */
 export function isDbConfigured(): boolean {
+  if (isDbPaused()) return false;
   const { url, key } = env();
   return !!url && !!key;
 }
