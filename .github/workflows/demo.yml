@@ -1,0 +1,94 @@
+# Временная демо-версия сайта, пока Vercel на паузе.
+#
+# Собирает сайт на реальных данных Google Таблиц, запускает его на сервере GitHub и открывает
+# по временной ссылке Cloudflare (https://….trycloudflare.com). Ссылка живёт, пока идёт задача
+# (до ~6 часов), и меняется при каждом запуске. Ссылка — в Actions → demo → Summary и в статусе
+# «demo» у коммита. Остановить раньше — Cancel run.
+#
+# Это только для показа: без Telegram-бота, базы и автообновления по сигналам (данные из таблиц
+# перечитываются сами раз в час). Основной сайт — Vercel.
+name: demo
+
+on:
+  push:
+    branches: [demo-preview]
+  workflow_dispatch:
+    inputs:
+      minutes:
+        description: "Сколько минут держать сайт (до 330)"
+        default: "330"
+
+permissions:
+  contents: read
+  statuses: write
+
+concurrency:
+  group: demo
+  cancel-in-progress: true
+
+jobs:
+  demo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Сборка на реальных данных
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Запуск сайта и ссылка
+        id: tunnel
+        run: |
+          nohup npm run start -- -p 3000 > next.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf -o /dev/null http://localhost:3000/main && break; sleep 2; done
+          curl -sfL -o cloudflared https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+          chmod +x cloudflared
+          nohup ./cloudflared tunnel --no-autoupdate --url http://localhost:3000 > tunnel.log 2>&1 &
+          for i in $(seq 1 60); do
+            URL=$(grep -o 'https://[a-z0-9-]*\.trycloudflare\.com' tunnel.log | head -1)
+            [ -n "$URL" ] && break
+            sleep 2
+          done
+          [ -n "$URL" ] || { cat tunnel.log; exit 1; }
+          # Ждём, пока ссылка начнёт открываться снаружи.
+          for i in $(seq 1 30); do curl -sf -o /dev/null "$URL/main" && break; sleep 3; done
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Демо-сайт::$URL/main"
+          {
+            echo "## Демо-сайт работает"
+            echo "- Общий прайс: $URL/main"
+            echo "- Каменная Горка: $URL/kamennaya-gorka"
+          } >> "$GITHUB_STEP_SUMMARY"
+          curl -sf -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d "{\"state\":\"success\",\"context\":\"demo\",\"description\":\"Демо-сайт работает\",\"target_url\":\"$URL/main\"}" > /dev/null
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+      - name: Сайт работает (отмена — Cancel run)
+        run: |
+          END=$(( $(date +%s) + ${MINUTES:-330} * 60 ))
+          while [ "$(date +%s)" -lt "$END" ]; do
+            if ! curl -sf -o /dev/null http://localhost:3000/main; then
+              echo "Сайт не ответил — перезапускаю"; tail -20 next.log
+              nohup npm run start -- -p 3000 >> next.log 2>&1 &
+            fi
+            sleep 60
+          done
+        env:
+          MINUTES: ${{ inputs.minutes }}
+      - name: Ссылка больше не работает
+        if: always()
+        run: |
+          curl -sf -X POST -H "Authorization: Bearer $GITHUB_TOKEN" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/statuses/${GITHUB_SHA}" \
+            -d '{"state":"failure","context":"demo","description":"Демо-сайт остановлен"}' > /dev/null || true
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
