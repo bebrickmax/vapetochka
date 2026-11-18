@@ -237,6 +237,8 @@ export interface SyncOptions {
   photoSeconds?: number;
   /** Не запускать, если последняя синхронизация была недавно (секунды). */
   minIntervalSeconds?: number;
+  /** Таблица уже скачана (автообновление сначала сверяет её версию) — не качать второй раз. */
+  sheets?: StoreSheets;
 }
 
 /** null — синхронизация уже идёт или была только что. */
@@ -257,7 +259,15 @@ export async function syncStore(storeId: string, options: SyncOptions = {}): Pro
 
 async function runSync(storeId: string, options: SyncOptions): Promise<SyncResult> {
   const store = getStore(storeId)!;
-  return syncFromSheets(storeId, await fetchStoreSheets(store), options);
+  return syncFromSheets(storeId, options.sheets ?? (await fetchStoreSheets(store)), options);
+}
+
+/**
+ * Таблица не менялась с последней синхронизации — база и так ей соответствует: отмечаем время проверки,
+ * чтобы витрина не запускала синхронизацию сама (см. INLINE_SYNC_SECONDS в catalog.ts).
+ */
+export async function markSynced(storeId: string): Promise<void> {
+  await update("store_settings", { store_id: `eq.${storeId}` }, { synced_at: iso(new Date()) });
 }
 
 /** Синхронизация по уже скачанной таблице (без блокировки — её берёт syncStore). */

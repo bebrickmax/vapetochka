@@ -48,11 +48,26 @@ export const sheetsConfig = {
 } as const;
 
 export const cacheConfig = {
-  /** Как часто (в секундах) сайт перечитывает таблицу сам. */
-  revalidateSeconds: 60,
+  /**
+   * Подстраховка: как часто (в секундах) витрина пересобирается сама, даже если сигналов об изменениях
+   * не было. Обычно свежесть дают сигналы: правка в админке, правка таблицы (Apps Script) и проверка
+   * раз в 10 минут (/api/revalidate) — они пересобирают витрину сразу, но только если что-то поменялось.
+   * Раньше здесь была минута: каждая пересборка заново качала обе таблицы со всеми фото, и бесплатные
+   * лимиты Vercel и Supabase кончались за пару недель.
+   */
+  revalidateSeconds: 60 * 60,
+  /** Сколько браузер может держать страницу, не спрашивая сервер (переходы внутри сайта). */
+  clientStaleSeconds: 60,
   tag: "catalog",
   /** Сырые данные Google Таблиц — сбрасываются при правке таблицы. */
   sheetsTag: "sheets",
   /** Лист «ОПТ» — свой кэш: при сбое Google остаётся прошлый. */
   wholesaleTag: "wholesale",
 } as const;
+
+/** Метки кэша одной точки: изменилась одна таблица — пересобирается только её витрина. */
+export const storeTags = (storeId: string) => ({
+  catalog: `${cacheConfig.tag}-${storeId}`,
+  sheets: `${cacheConfig.sheetsTag}-${storeId}`,
+  wholesale: `${cacheConfig.wholesaleTag}-${storeId}`,
+});

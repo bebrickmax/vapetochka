@@ -1,5 +1,5 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { cacheConfig, sheetsConfig } from "@/config/site";
+import { cacheConfig, sheetsConfig, storeTags } from "@/config/site";
 import { getStore, type Store } from "@/config/stores";
 import { demoSheets, demoWholesaleSheet } from "@/data/demo-sheets";
 import { assignFamilies } from "@/lib/brands";
@@ -7,6 +7,7 @@ import { proxyImages } from "@/lib/photos";
 import { uniqueKeys } from "@/lib/products";
 import { categoryFromSheet } from "@/lib/sheets/categories";
 import { parseSheet } from "@/lib/sheets/parse";
+import { sheetsVersion } from "@/lib/sheets/version";
 import { catalogFromSnapshot, loadSnapshot } from "@/lib/db/catalog";
 import { cleanupOverrides, loadOverrides } from "@/lib/db/overrides";
 import { loadSettings, sourceOf, syncStore, type SyncResult } from "@/lib/db/sync";
@@ -63,13 +64,30 @@ async function loadSheets(store: Store): Promise<StoreSheets & { source: Catalog
 }
 
 /**
+ * Сколько живёт кэш витрины. Свежесть дают сигналы об изменениях (см. cacheConfig.revalidateSeconds),
+ * а сама по себе витрина пересобирается не чаще раза в час.
+ */
+const cacheProfile = {
+  stale: cacheConfig.clientStaleSeconds,
+  revalidate: cacheConfig.revalidateSeconds,
+  expire: 60 * 60 * 24 * 7,
+};
+
+/**
+ * Перед показом витрины точка «от таблицы» подтягивает изменения таблицы в базу, только если
+ * автообновление давно не синхронизировало её само (например, расписание не настроено).
+ */
+const INLINE_SYNC_SECONDS = 15 * 60;
+
+/**
  * Оптовые цены (лист «ОПТ» живёт в Google Таблице) — со своим кэшем: если Google временно
  * не отвечает, ошибка не кэшируется и витрина показывает прошлый ОПТ, а не пустой раздел.
  */
 async function cachedWholesale(storeId: string): Promise<Wholesale | null> {
   "use cache";
-  cacheTag(cacheConfig.wholesaleTag);
-  cacheLife({ stale: 60, revalidate: 300, expire: 60 * 60 * 24 * 30 });
+  cacheTag(cacheConfig.wholesaleTag, storeTags(storeId).wholesale);
+  // Долгий срок: если Google не отвечает, витрина показывает прошлый ОПТ, а не пустой раздел.
+  cacheLife({ ...cacheProfile, expire: 60 * 60 * 24 * 30 });
   const store = getStore(storeId);
   if (!store || process.env.CATALOG_SOURCE === "demo") return null;
   const sheet = await fetchWholesaleSheet(store);
@@ -107,25 +125,20 @@ async function loadDbCatalog(
  */
 class KeepLastVersion extends Error {}
 
-const cacheProfile = {
-  stale: cacheConfig.revalidateSeconds,
-  revalidate: cacheConfig.revalidateSeconds,
-  expire: 60 * 60 * 24 * 7,
-};
-
 /**
  * Каталог точки ровно как в Google Таблице (без правок из админки). Кэшируется
  * отдельно: правка наличия в админке не заставляет заново скачивать таблицу.
  */
 export async function getSheetCatalog(storeId: string): Promise<Catalog> {
   "use cache";
-  cacheTag(cacheConfig.sheetsTag);
+  cacheTag(cacheConfig.sheetsTag, storeTags(storeId).sheets);
   cacheLife(cacheProfile);
 
   const store = getStore(storeId);
   if (!store) throw new Error(`Неизвестная точка: ${storeId}`);
-  const { sheets, wholesale: wholesaleSheet, source } = await loadSheets(store);
-  const catalog = buildCatalog(sheets, source, store.id);
+  const data = await loadSheets(store);
+  const { sheets, wholesale: wholesaleSheet, source } = data;
+  const catalog: Catalog = { ...buildCatalog(sheets, source, store.id), version: sheetsVersion(data) };
   const wholesale = source === "demo" ? wholesaleSheet && buildWholesale(wholesaleSheet, store.id) : await wholesaleFor(store.id, wholesaleSheet);
   return wholesale ? { ...catalog, wholesale } : catalog;
 }
@@ -147,13 +160,13 @@ async function withOverrides(catalog: Catalog): Promise<Catalog> {
 }
 
 /**
- * Каталог точки с кэшем: страница отдаётся мгновенно из кэша, а раз в
- * `revalidateSeconds` данные перечитываются в фоне. Любое изменение в админке
- * (и /api/revalidate) сбрасывает кэш сразу — следующий запрос получит свежие данные.
+ * Каталог точки с кэшем: страница отдаётся мгновенно из кэша. Изменения в админке и в таблице
+ * (/api/revalidate) сбрасывают кэш сразу — следующий запрос получит свежие данные; для подстраховки
+ * данные перечитываются в фоне раз в `revalidateSeconds`.
  *
  * Откуда берутся товары, решает настройка точки в админке:
- *   «от таблицы» — база как зеркало Google Таблицы: перед показом подтягиваются изменения
- *                  таблицы (не чаще раза в 20 секунд), а правки и новинки из админки сохраняются;
+ *   «от таблицы» — база как зеркало Google Таблицы (её синхронизирует автообновление; если оно давно
+ *                  не приходило — перед показом), а правки и новинки из админки сохраняются;
  *   «от админки» — только база, таблица не влияет.
  * База ещё не настроена или точка в ней пустая (до первой синхронизации) — показываем саму таблицу.
  *
@@ -163,7 +176,7 @@ async function withOverrides(catalog: Catalog): Promise<Catalog> {
  */
 export async function getCatalog(storeId: string): Promise<Catalog> {
   "use cache";
-  cacheTag(cacheConfig.tag);
+  cacheTag(cacheConfig.tag, storeTags(storeId).catalog);
   cacheLife(cacheProfile);
 
   const store = getStore(storeId);
@@ -190,7 +203,7 @@ export async function getCatalog(storeId: string): Promise<Catalog> {
 
   let synced: SyncResult | null = null;
   try {
-    synced = await syncStore(store.id, { minIntervalSeconds: 20, maxPhotos: 8 });
+    synced = await syncStore(store.id, { minIntervalSeconds: INLINE_SYNC_SECONDS, maxPhotos: 8 });
   } catch (error) {
     console.error(`[catalog] Синхронизация «${store.title}» не удалась, показываю последнюю:`, error);
   }

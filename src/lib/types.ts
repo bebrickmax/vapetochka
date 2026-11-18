@@ -88,6 +88,11 @@ export interface Catalog {
   wholesale?: Wholesale;
   updatedAt: string;
   source: CatalogSource;
+  /**
+   * Версия Google Таблицы, из которой собрана витрина (src/lib/sheets/version.ts). По ней автообновление
+   * понимает, что таблица не менялась и пересобирать страницу не нужно. Нет — витрина из базы.
+   */
+  version?: string;
 }
 
 /** Плоская позиция — то, что попадает в корзину и поиск. */
