@@ -20,25 +20,45 @@ export function googleImageUrl(token: string, size: number): string {
   return `https://docs.google.com/sheets-images-rt/${token}=s${size}`;
 }
 
-/** Адрес фото на сайте: точка, лист и строка нужны, чтобы найти свежую ссылку, если старая устарела. */
-export function photoPath(storeId: string, gid: string, row: number, googleUrl: string): string | null {
-  const token = imageToken(googleUrl);
-  if (!token) return null;
-  const params = new URLSearchParams({ store: storeId, gid, row: String(row), t: token });
+/** Отпечаток строки в адресе фото: латиница в нижнем регистре и цифры. */
+export const ROW_KEY_RE = /^[0-9a-z]{1,13}$/;
+
+/**
+ * Короткий отпечаток строки таблицы (FNV-1a): меняется вместе со строкой. Входит в адрес фото вместо
+ * токена Google — тот меняется сам каждые несколько секунд (проверено: ~40% картинок листа за 10 секунд),
+ * и с токеном в адресе после каждой пересборки витрины покупатели заново качали фото через сайт.
+ */
+export function rowKey(cells: readonly string[] | undefined): string {
+  const text = JSON.stringify(cells ?? []);
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+/**
+ * Постоянный адрес фото на сайте: точка, лист, строка и отпечаток строки. Свежую ссылку Google на
+ * картинку сайт находит сам по точке, листу и строке (/api/photo), а CDN хранит фото по этому адресу.
+ */
+export function photoPath(storeId: string, gid: string, row: number, key: string): string {
+  const params = new URLSearchParams({ store: storeId, gid, row: String(row), k: key });
   return `/api/photo?${params}`;
 }
 
-/** Фото листа с адресами сайта вместо адресов Google. */
+/** Фото листа с адресами сайта вместо адресов Google. rows — строки листа (для отпечатков). */
 export function proxyImages(
   storeId: string,
   gid: string | undefined,
   images: Record<number, string> | undefined,
+  rows?: readonly (readonly string[])[],
 ): Record<number, string> {
   if (!gid || !images) return {};
   const result: Record<number, string> = {};
   for (const [row, url] of Object.entries(images)) {
-    const path = photoPath(storeId, gid, Number(row), url);
-    if (path) result[Number(row)] = path;
+    if (!imageToken(url)) continue; // не картинка Google
+    result[Number(row)] = photoPath(storeId, gid, Number(row), rowKey(rows?.[Number(row)]));
   }
   return result;
 }

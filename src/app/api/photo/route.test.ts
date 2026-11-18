@@ -3,6 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "./route";
 
+// Вне Next.js кэш-функции не работают — здесь они не нужны.
+vi.mock("next/cache", () => ({ cacheLife: () => {}, cacheTag: () => {} }));
+
 const PROJECT = "https://abcd1234.supabase.co";
 const PHOTO = `${PROJECT}/storage/v1/object/public/photos/uploads/123-abc.png`;
 
@@ -45,5 +48,43 @@ describe("/api/photo — фото из хранилища", () => {
   it("отказывает чужим адресам и размерам", async () => {
     expect((await get({ u: "https://evil.example/x.jpg", s: "360" })).status).toBe(404);
     expect((await get({ u: PHOTO, s: "999" })).status).toBe(404);
+  });
+});
+
+describe("/api/photo — фото из Google Таблицы по постоянному адресу", () => {
+  const TOKEN = "ADdU-aw" + "a".repeat(40);
+  const ROTATED = "ADdU-aw" + "b".repeat(40);
+  /** Веб-просмотр листа: в строке 3 картинка с текущей ссылкой Google. */
+  const sheetHtml = (token: string) =>
+    `<table><tr><th id="0R3">4</th><td><img src="https://docs.google.com/sheets-images-rt/${token}=w100-h50"></td><td>Банан</td></tr></table>`;
+
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("находит свежую ссылку по листу и строке; CDN хранит фото сутки", async () => {
+    let current = TOKEN;
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/htmlview/sheet")) return new Response(sheetHtml(current));
+      if (url.includes(`/sheets-images-rt/${current}=s360`)) return new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } });
+      return new Response("expired", { status: 403, headers: { "content-type": "text/html" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await get({ store: "main", gid: "618442738", row: "3", k: "abc12", s: "360" });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("public, max-age=86400, s-maxage=86400");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(new Uint8Array([1, 2, 3]));
+
+    // Google сменил ссылку, а в памяти старая — сайт спрашивает Google заново.
+    current = ROTATED;
+    const again = await get({ store: "main", gid: "618442738", row: "3", k: "abc12", s: "360" });
+    expect(again.status).toBe(200);
+  });
+
+  it("в строке нет фото или адрес чужой — 404", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(sheetHtml(TOKEN))));
+    expect((await get({ store: "main", gid: "618442738", row: "7", k: "abc12", s: "360" })).status).toBe(404);
+    expect((await get({ store: "main", gid: "618442738", row: "3", k: "НЕ-ТО", s: "360" })).status).toBe(404);
+    expect((await get({ store: "nope", gid: "618442738", row: "3", k: "abc12", s: "360" })).status).toBe(404);
   });
 });

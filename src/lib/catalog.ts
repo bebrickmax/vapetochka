@@ -27,7 +27,7 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId 
   for (const sheet of sheets) {
     const category = categoryFromSheet(sheet.title);
     if (usedIds.has(category.id)) category.id = `${category.id}-${usedIds.size}`;
-    const parsed = parseSheet(sheet.rows, category.id, proxyImages(storeId, sheet.gid, sheet.images));
+    const parsed = parseSheet(sheet.rows, category.id, proxyImages(storeId, sheet.gid, sheet.images, sheet.rows));
     if (parsed.length === 0) continue; // пустые листы не показываем
     usedIds.add(category.id);
     categories.push(category);
@@ -45,7 +45,7 @@ export function buildCatalog(sheets: RawSheet[], source: CatalogSource, storeId 
 
 /** Лист «ОПТ» → оптовые цены по ступеням; если он не похож на прайс — просто строки текста. */
 export function buildWholesale(sheet: RawSheet, storeId = "main"): Wholesale | undefined {
-  return parseWholesaleSheet(sheet.rows, proxyImages(storeId, sheet.gid, sheet.images));
+  return parseWholesaleSheet(sheet.rows, proxyImages(storeId, sheet.gid, sheet.images, sheet.rows));
 }
 
 async function loadSheets(store: Store): Promise<StoreSheets & { source: CatalogSource }> {
