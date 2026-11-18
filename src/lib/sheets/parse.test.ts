@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { demoSheets } from "@/data/demo-sheets";
 import { buildCatalog, buildWholesale } from "@/lib/catalog";
+import { rowKey } from "@/lib/photos";
 import { parseCsv } from "./csv";
 import { parsePrice, parseSheet, parseStatus, parseStrength, splitItemName } from "./parse";
 
@@ -186,7 +187,7 @@ describe("buildWholesale", () => {
     expect(w.sections[0].brands[0].items[0]).toEqual({
       name: "Duall 20mg",
       prices: [11, 10.5, 10, 9.5],
-      image: "/api/photo?store=main&gid=1363263078&row=5&t=AO43MLduallDuallDuallDuall",
+      image: `/api/photo?store=main&gid=1363263078&row=5&k=${rowKey(rows[5])}`,
     });
     expect(w.sections[1].brands[0].items[0].prices).toEqual([11, 10.5, 10, 9.5]);
   });
