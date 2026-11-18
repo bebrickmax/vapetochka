@@ -53,20 +53,20 @@ function groupBy(entries: LineEntry[], keyOf: (g: ProductGroup) => string): [str
 }
 
 /**
- * Освежает данные витрины без перезагрузки: когда вкладка снова на экране и раз в 5 минут.
- * router.refresh() подтягивает свежую страницу с сервера и сохраняет состояние экрана
- * (поиск, вкладку, корзину). Не чаще раза в 30 секунд и не во время поиска/корзины.
+ * Освежает данные витрины без перезагрузки: когда вкладка снова на экране и раз в 10 минут.
+ * router.refresh() подтягивает свежую страницу (обычно прямо из кэша CDN, без работы сервера)
+ * и сохраняет состояние экрана (поиск, вкладку, корзину). Не чаще раза в минуту и не во время поиска/корзины.
  */
 function useFreshCatalog(busy: boolean) {
   const router = useRouter();
   useEffect(() => {
     let last = Date.now();
     const refresh = () => {
-      if (document.visibilityState !== "visible" || busy || Date.now() - last < 30_000) return;
+      if (document.visibilityState !== "visible" || busy || Date.now() - last < 60_000) return;
       last = Date.now();
       router.refresh();
     };
-    const timer = window.setInterval(refresh, 5 * 60_000);
+    const timer = window.setInterval(refresh, 10 * 60_000);
     document.addEventListener("visibilitychange", refresh);
     return () => {
       window.clearInterval(timer);

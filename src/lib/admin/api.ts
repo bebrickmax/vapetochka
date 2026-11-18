@@ -21,14 +21,15 @@ export const json = (data: unknown, status = 200) =>
  * Сразу после ответа сам открывает страницы точек: они отдаются из кэша, а свежая
  * версия собирается в фоне — через несколько секунд её видят все, и никто не ждёт.
  */
-export function warmStorefront(request: Request) {
+export function warmStorefront(request: Request, storeIds: readonly string[] = stores.map((store) => store.id)) {
+  if (storeIds.length === 0) return;
   const origin = new URL(request.url).origin;
   after(async () => {
     // Сброс кэша Next применяет, когда обработчик уже ответил, — даём ему секунду, чтобы страница
     // точно считалась устаревшей и пересобралась, а не отдалась из кэша как свежая.
     await new Promise((resolve) => setTimeout(resolve, 1200));
     await Promise.allSettled(
-      stores.map((store) => fetch(`${origin}/${store.id}`, { cache: "no-store", signal: AbortSignal.timeout(30_000) })),
+      storeIds.map((id) => fetch(`${origin}/${id}`, { cache: "no-store", signal: AbortSignal.timeout(30_000) })),
     );
   });
 }

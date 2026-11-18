@@ -168,6 +168,17 @@ export async function storageList(bucket: string, limit = 100): Promise<string[]
   return ((await res.json()) as { name: string; id: string | null }[]).filter((f) => f.id !== null).map((f) => f.name);
 }
 
+/** Текстовый файл из бакета (закрытого или публичного); null — такого файла нет. */
+export async function storageDownload(bucket: string, path: string): Promise<string | null> {
+  try {
+    return await (await request(`/storage/v1/object/${bucket}/${path}`)).text();
+  } catch (error) {
+    // Хранилище Supabase отвечает на отсутствующий файл 400 или 404 — в зависимости от версии.
+    if (error instanceof DbError && (error.status === 400 || error.status === 404)) return null;
+    throw error;
+  }
+}
+
 export async function storageRemove(bucket: string, paths: string[]): Promise<void> {
   if (paths.length === 0) return;
   await request(`/storage/v1/object/${bucket}`, {

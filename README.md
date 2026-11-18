@@ -65,7 +65,7 @@ Google Sheets ──► src/lib/sheets/sources.ts   (список листов, 
               ──► src/lib/sheets/htmlview.ts  (листы и картинки в ячейках из веб-просмотра)
               ──► src/lib/sheets/parse.ts     (строки листа → линейки, позиции, фото)
               ──► src/lib/brands.ts           (бренды-«чипсы» внутри категории)
-              ──► src/lib/catalog.ts          ('use cache' + cacheLife 60s + cacheTag, по точке)
+              ──► src/lib/catalog.ts          ('use cache' + cacheLife 1 ч + cacheTag, по точке)
               ──► src/app/[store]/page.tsx    (статические страницы точек, ISR)
               ──► src/components/Catalog.tsx  (клиент: вкладки, бренды, поиск, фильтр)
 ```
@@ -89,13 +89,19 @@ Google Sheets ──► src/lib/sheets/sources.ts   (список листов, 
 - крепость (`20mg`, `5%`) извлекается из названия линейки;
 - объявления («ВНИМАНИЕ…», «Для заказа @…») и одиночные ✅/❌ в колонке A пропускаются.
 
-**Кэш и обновление.** `getCatalog()` помечен `'use cache'` с `cacheLife({ revalidate: 60 })`:
-страница отдаётся статикой, а таблица перечитывается в фоне не чаще раза в минуту
-(stale-while-revalidate). Если Google недоступен, в продакшене функция падает и Next.js
-продолжает отдавать последнюю удачную версию. Для мгновенного обновления есть
-`/api/revalidate` (GET/POST, секрет в `x-revalidate-secret` или `?secret=`), который вызывает
-`revalidateTag('catalog', { expire: 0 })`; его дёргает Apps Script-триггер из
-`google-apps-script/auto-update.gs`.
+**Кэш и обновление.** `getCatalog()` помечен `'use cache'` с `cacheLife({ revalidate: 3600 })`:
+страница отдаётся статикой, а сама по себе перечитывает таблицу не чаще раза в час — это только
+подстраховка. Если Google недоступен, в продакшене функция падает и Next.js продолжает отдавать
+последнюю удачную версию. Свежесть дают сигналы `/api/revalidate` (GET/POST, секрет в
+`x-revalidate-secret` или `?secret=`): их шлют Apps Script после правки и раз в 10 минут
+(`google-apps-script/auto-update.gs`) и расписание Supabase (`supabase/cron.sql`).
+
+Сигнал экономный (`src/lib/refresh.ts`): скачиваются только значения ячеек, без фото, и считается их
+версия (`src/lib/sheets/version.ts`). База на паузе — версия сравнивается с `<meta name="vt-catalog-version">`
+на странице точки; база работает — с версией последней синхронизации (`sync-state.json` в закрытом бакете
+`backups`, раз в 6 часов синхронизация всё равно проходит целиком). Совпало — больше ничего не делается.
+Не совпало — фото, синхронизация базы и `revalidateTag` с метками только этой точки (`storeTags()`),
+затем сайт сам открывает её страницу, чтобы она пересобралась до прихода покупателей.
 
 ## Структура
 

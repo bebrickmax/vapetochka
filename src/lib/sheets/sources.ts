@@ -110,8 +110,25 @@ export async function fetchSheetImages(store: Store, gid: string): Promise<Recor
   }
 }
 
-async function withImages(store: Store, tab: SheetTab, rows: string[][]): Promise<RawSheet> {
-  return { title: tab.title, gid: tab.gid, rows, images: await fetchSheetImages(store, tab.gid) };
+async function withImages(store: Store, sheet: SheetRows): Promise<RawSheet> {
+  return { title: sheet.title, gid: sheet.gid, rows: sheet.rows, images: await fetchSheetImages(store, sheet.gid) };
+}
+
+/** Лист без фото — только значения ячеек. */
+export interface SheetRows {
+  title: string;
+  gid: string;
+  rows: string[][];
+}
+
+/** Значения ячеек всех листов точки (без фото) — по ним дёшево понять, менялась ли таблица. */
+export interface StoreRows {
+  /** Листы каталога (без исключённых и без листа ОПТ). */
+  sheets: SheetRows[];
+  /** Лист оптовых цен, если он есть. */
+  wholesale?: SheetRows;
+  /** Список листов запасной (см. StoreSheets.partial). */
+  partial?: boolean;
 }
 
 export interface StoreSheets {
@@ -126,11 +143,11 @@ export interface StoreSheets {
   partial?: boolean;
 }
 
-async function loadWholesaleTab(store: Store, tab: SheetTab | undefined): Promise<RawSheet | undefined> {
+async function loadWholesaleRows(store: Store, tab: SheetTab | undefined): Promise<SheetRows | undefined> {
   if (!tab) return undefined;
   try {
     const [rows] = await fetchRows(store, [tab]);
-    return await withImages(store, tab, rows);
+    return { title: tab.title, gid: tab.gid, rows };
   } catch (error) {
     // Раздел ОПТ необязательный: без него каталог всё равно должен работать.
     console.warn(`[catalog] Лист «${tab.title}» («${store.title}») недоступен:`, error);
@@ -151,16 +168,34 @@ export async function fetchWholesaleSheet(store: Store): Promise<RawSheet | null
   const tab = findWholesaleTab((await listTabs(store)).tabs);
   if (!tab) return null;
   const [rows] = await fetchRows(store, [tab]);
-  return withImages(store, tab, rows);
+  return withImages(store, { title: tab.title, gid: tab.gid, rows });
 }
 
-/** Все данные таблицы точки: листы каталога с фото и лист «ОПТ». */
-export async function fetchStoreSheets(store: Store): Promise<StoreSheets> {
+/**
+ * Значения всех листов точки без фото: список листов + по одной выгрузке на лист.
+ * Фото (веб-просмотр каждого листа — самое тяжёлое) не скачиваются: их добавляет withSheetImages,
+ * когда таблица действительно изменилась.
+ */
+export async function fetchStoreRows(store: Store): Promise<StoreRows> {
   const { tabs, fallback } = await listTabs(store);
   const wholesaleTab = findWholesaleTab(tabs);
   const catalogTabs = tabs.filter((t) => !isExcluded(t.title) && t !== wholesaleTab);
 
-  const [rows, wholesale] = await Promise.all([fetchRows(store, catalogTabs), loadWholesaleTab(store, wholesaleTab)]);
-  const sheets = await Promise.all(catalogTabs.map((tab, i) => withImages(store, tab, rows[i])));
+  const [rows, wholesale] = await Promise.all([fetchRows(store, catalogTabs), loadWholesaleRows(store, wholesaleTab)]);
+  const sheets = catalogTabs.map((tab, i) => ({ title: tab.title, gid: tab.gid, rows: rows[i] }));
   return { sheets, ...(wholesale && { wholesale }), ...(fallback && { partial: true }) };
+}
+
+/** Добавляет к уже скачанным значениям фото из ячеек колонки A. */
+export async function withSheetImages(store: Store, data: StoreRows): Promise<StoreSheets> {
+  const [sheets, wholesale] = await Promise.all([
+    Promise.all(data.sheets.map((sheet) => withImages(store, sheet))),
+    data.wholesale ? withImages(store, data.wholesale) : Promise.resolve(undefined),
+  ]);
+  return { sheets, ...(wholesale && { wholesale }), ...(data.partial && { partial: true }) };
+}
+
+/** Все данные таблицы точки: листы каталога с фото и лист «ОПТ». */
+export async function fetchStoreSheets(store: Store): Promise<StoreSheets> {
+  return withSheetImages(store, await fetchStoreRows(store));
 }
